@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/app_theme.dart';
 import '../settings/settings_screen.dart';
 
@@ -72,6 +73,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _loading = true;
   bool _hasError = false;
 
+  Map<String, bool> _prayerLogs = {};
+  int _streakDays = 0;
+
   static const _fallbackLat = 51.5074;
   static const _fallbackLon = -0.1278;
 
@@ -105,6 +109,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
 
     _loadPrayers();
+    _loadPrayerLogs();
   }
 
   @override
@@ -193,6 +198,44 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final diff = target.difference(now);
       setState(() => _remaining = diff.isNegative ? Duration.zero : diff);
     });
+  }
+
+  // ── Prayer log persistence ────────────────────────────────────────────────
+
+  String _todayKey() => DateFormat('yyyy-MM-dd').format(DateTime.now());
+  String _prefKey(String dateKey, String name) => 'prayer_log_${dateKey}_$name';
+
+  Future<void> _loadPrayerLogs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final dk = _todayKey();
+    final logs = {for (final n in _names) n: prefs.getBool(_prefKey(dk, n)) ?? false};
+    if (!mounted) return;
+    setState(() {
+      _prayerLogs = logs;
+      _streakDays = _computeStreak(prefs);
+    });
+  }
+
+  int _computeStreak(SharedPreferences prefs) {
+    int streak = 0;
+    var day = DateTime.now();
+    for (int i = 0; i < 365; i++) {
+      final dk = DateFormat('yyyy-MM-dd').format(day);
+      if (_names.every((n) => prefs.getBool(_prefKey(dk, n)) == true)) {
+        streak++;
+        day = day.subtract(const Duration(days: 1));
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  Future<void> _togglePrayer(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _prefKey(_todayKey(), name);
+    await prefs.setBool(key, !(prefs.getBool(key) ?? false));
+    await _loadPrayerLogs();
   }
 
   // ── Computed props ────────────────────────────────────────────────────────
@@ -351,10 +394,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           nextIdx: _nextIdx,
           currIdx: _currIdx,
           pulseAnim: _pulseAnim,
+          prayerLogs: _prayerLogs,
+          onToggle: _togglePrayer,
         ),
         const SizedBox(height: 18),
         _StreakChip(
-          streakDays: 14,
+          streakDays: _streakDays,
           todayWeekday: DateTime.now().weekday,
         ),
       ],
@@ -650,12 +695,16 @@ class _PrayerListCard extends StatelessWidget {
   final int nextIdx;
   final int currIdx;
   final AnimationController pulseAnim;
+  final Map<String, bool> prayerLogs;
+  final void Function(String) onToggle;
 
   const _PrayerListCard({
     required this.prayers,
     required this.nextIdx,
     required this.currIdx,
     required this.pulseAnim,
+    required this.prayerLogs,
+    required this.onToggle,
   });
 
   @override
@@ -673,7 +722,9 @@ class _PrayerListCard extends StatelessWidget {
               prayer: prayers[i],
               isCurrent: i == currIdx,
               isCompleted: i < currIdx,
+              isLogged: prayerLogs[prayers[i].name] ?? false,
               isLast: i == prayers.length - 1,
+              onTap: i == currIdx ? () => onToggle(prayers[i].name) : null,
               pulseAnim: pulseAnim,
             ),
         ],
@@ -684,14 +735,17 @@ class _PrayerListCard extends StatelessWidget {
 
 class _PrayerRow extends StatelessWidget {
   final _Prayer prayer;
-  final bool isCurrent, isCompleted, isLast;
+  final bool isCurrent, isCompleted, isLogged, isLast;
+  final VoidCallback? onTap;
   final AnimationController pulseAnim;
 
   const _PrayerRow({
     required this.prayer,
     required this.isCurrent,
     required this.isCompleted,
+    required this.isLogged,
     required this.isLast,
+    this.onTap,
     required this.pulseAnim,
   });
 
@@ -779,30 +833,36 @@ class _PrayerRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          // Check circle
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isCompleted
-                  ? AppTheme.accent.withValues(alpha: 0.14)
-                  : isCurrent
-                      ? AppTheme.primary.withValues(alpha: 0.10)
-                      : const Color(0xFF1C2840),
-              border: Border.all(
-                color: isCompleted
-                    ? AppTheme.accent.withValues(alpha: 0.45)
+          // Log circle
+          GestureDetector(
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isLogged
+                    ? AppTheme.accent.withValues(alpha: 0.18)
                     : isCurrent
-                        ? AppTheme.primary.withValues(alpha: 0.35)
-                        : const Color(0xFF283550),
-                width: 1.5,
+                        ? AppTheme.primary.withValues(alpha: 0.10)
+                        : Colors.transparent,
+                border: Border.all(
+                  color: isLogged
+                      ? AppTheme.accent
+                      : isCurrent
+                          ? AppTheme.primary.withValues(alpha: 0.35)
+                          : isCompleted
+                              ? const Color(0xFF283550).withValues(alpha: 0.40)
+                              : const Color(0xFF283550),
+                  width: 1.5,
+                ),
               ),
+              child: isLogged
+                  ? const Icon(Icons.check_rounded,
+                      size: 14, color: AppTheme.accent)
+                  : null,
             ),
-            child: isCompleted
-                ? const Icon(Icons.check_rounded,
-                    size: 14, color: AppTheme.accent)
-                : null,
           ),
         ],
       ),

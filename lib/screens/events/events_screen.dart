@@ -239,36 +239,87 @@ class _EventsScreenState extends State<EventsScreen> {
     final events = _filtered;
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: Column(
+      body: Stack(
         children: [
-          _Header(
-            radii: _radii,
-            selected: _radiusMi,
-            onSelect: (r) => setState(() => _radiusMi = r),
-          ),
-          Expanded(
-            child: events.isEmpty
-                ? _EmptyState(
-                    onExpand: () => setState(() => _radiusMi = _radii.last),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                    itemCount: events.length,
-                    itemBuilder: (context, i) {
-                      final e = events[i];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _EventCard(
-                          event: e,
-                          joined: _joined.contains(e.id),
-                          attendeeCount: _count(e),
-                          distLabel: _distLabel(e.distanceMi),
-                          dateLabel: _dateLabel(e.dateTime),
-                          onJoin: () => _toggleJoin(e),
-                        ),
-                      );
-                    },
+          // Content at 25% opacity.
+          // AbsorbPointer wraps interactive widgets so taps are blocked, but
+          // the ListView itself is unwrapped so scroll drag events still work.
+          Opacity(
+            opacity: 0.25,
+            child: Column(
+              children: [
+                AbsorbPointer(
+                  child: _Header(
+                    radii: _radii,
+                    selected: _radiusMi,
+                    onSelect: (r) => setState(() => _radiusMi = r),
                   ),
+                ),
+                Expanded(
+                  child: events.isEmpty
+                      ? AbsorbPointer(
+                          child: _EmptyState(
+                            onExpand: () =>
+                                setState(() => _radiusMi = _radii.last),
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                          itemCount: events.length,
+                          itemBuilder: (context, i) {
+                            final e = events[i];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: AbsorbPointer(
+                                child: _EventCard(
+                                  event: e,
+                                  joined: _joined.contains(e.id),
+                                  attendeeCount: _count(e),
+                                  distLabel: _distLabel(e.distanceMi),
+                                  dateLabel: _dateLabel(e.dateTime),
+                                  onJoin: () => _toggleJoin(e),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+          // Lock overlay — IgnorePointer so it doesn't block scroll events.
+          IgnorePointer(
+            child: Align(
+              alignment: const Alignment(0, 0.15),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.lock_rounded,
+                    size: 100,
+                    color: AppTheme.textPrimary,
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Coming Soon',
+                    style: GoogleFonts.outfit(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Events Launching Soon',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textSubtle,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
