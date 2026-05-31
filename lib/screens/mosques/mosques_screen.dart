@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../../theme/app_theme.dart';
 import '../settings/settings_screen.dart';
+import '../notifications/notifications_screen.dart';
 
 // ── Dark map style ────────────────────────────────────────────────────────
 
@@ -389,11 +390,7 @@ class _MosquesScreenState extends State<MosquesScreen>
         title: Text('Mosques',
             style: TextStyle(color: AppTheme.textPrimary)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined, size: 22),
-            color: AppTheme.textSubtle,
-            onPressed: () {},
-          ),
+          const BellIconButton(),
           IconButton(
             icon: const Icon(Icons.settings_outlined, size: 22),
             color: AppTheme.textSubtle,

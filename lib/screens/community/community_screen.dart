@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_theme.dart';
+import '../notifications/notifications_screen.dart';
 
 // ── Data models ───────────────────────────────────────────────────────────
 
@@ -60,22 +61,6 @@ class _MixedEntry {
     required this.streak,
     required this.isFriend,
     this.prayers,
-  });
-}
-
-class _FeedItem {
-  final IconData icon;
-  final Color iconColor;
-  final String boldName;
-  final String text;
-  final String time;
-
-  const _FeedItem({
-    required this.icon,
-    required this.iconColor,
-    required this.boldName,
-    required this.text,
-    required this.time,
   });
 }
 
@@ -226,50 +211,6 @@ const _top100NonFriends = [
   _NonFriend(id: 'uk10', name: 'Dawud L.',   avatarColor: _teal,   activeStreak: 1),
 ];
 
-final _feedItems = [
-  _FeedItem(
-    icon: Icons.local_fire_department_rounded,
-    iconColor: _orange,
-    boldName: 'Adam K.',
-    text: ' hit a 10-day streak — keep going!',
-    time: '2m ago',
-  ),
-  _FeedItem(
-    icon: Icons.event_available_rounded,
-    iconColor: _teal,
-    boldName: 'Ibrahim S.',
-    text: ' joined Quran Recitation Circle at Masjid Al-Noor',
-    time: '18m ago',
-  ),
-  _FeedItem(
-    icon: Icons.mosque_rounded,
-    iconColor: _gold,
-    boldName: 'Omar R.',
-    text: ' prayed Jumu\'ah at East London Mosque',
-    time: '1h ago',
-  ),
-  _FeedItem(
-    icon: Icons.military_tech_rounded,
-    iconColor: _purple,
-    boldName: 'Yusuf M.',
-    text: ' earned the "Night Owl" badge — 5 consecutive Isha prayers',
-    time: '3h ago',
-  ),
-  _FeedItem(
-    icon: Icons.local_fire_department_rounded,
-    iconColor: _orange,
-    boldName: 'Hasin',
-    text: ' reached a 14-day streak — masha\'Allah!',
-    time: '5h ago',
-  ),
-  _FeedItem(
-    icon: Icons.people_rounded,
-    iconColor: _blue,
-    boldName: 'Zaid H.',
-    text: ' joined the community — say salaam!',
-    time: 'Yesterday',
-  ),
-];
 
 // ── Screen ────────────────────────────────────────────────────────────────
 
@@ -381,74 +322,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
               ),
             ),
           ),
-          // ── Live feed divider ─────────────────────────────────────────
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      height: 1,
-                      color: const Color(0xFF1A2440),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFF22C55E),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF22C55E)
-                                    .withValues(alpha: 0.5),
-                                blurRadius: 6,
-                                spreadRadius: 1,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 7),
-                        Text(
-                          'Live Feed',
-                          style: GoogleFonts.outfit(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.textSubtle,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Container(
-                      height: 1,
-                      color: const Color(0xFF1A2440),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // ── Feed items ────────────────────────────────────────────────
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, i) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _FeedCard(item: _feedItems[i]),
-                ),
-                childCount: _feedItems.length,
-              ),
-            ),
-          ),
+          const SliverPadding(padding: EdgeInsets.only(bottom: 32)),
         ],
       ),
     );
@@ -510,6 +384,8 @@ class _Header extends StatelessWidget {
                       ],
                     ),
                   ),
+                  const BellIconButton(),
+                  const SizedBox(width: 4),
                   // Friend count chip
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -998,76 +874,3 @@ class _StreakBadge extends StatelessWidget {
   }
 }
 
-// ── Feed card ─────────────────────────────────────────────────────────────
-
-class _FeedCard extends StatelessWidget {
-  final _FeedItem item;
-  const _FeedCard({required this.item});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF1A2440), width: 1),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Icon badge
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: item.iconColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                  color: item.iconColor.withValues(alpha: 0.25), width: 1),
-            ),
-            child: Icon(item.icon, size: 18, color: item.iconColor),
-          ),
-          const SizedBox(width: 12),
-          // Text
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                RichText(
-                  text: TextSpan(
-                    style: GoogleFonts.outfit(
-                      fontSize: 13,
-                      color: AppTheme.textPrimary,
-                      fontWeight: FontWeight.w400,
-                      height: 1.4,
-                    ),
-                    children: [
-                      TextSpan(
-                        text: item.boldName,
-                        style: GoogleFonts.outfit(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      TextSpan(text: item.text),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  item.time,
-                  style: GoogleFonts.outfit(
-                    fontSize: 11,
-                    color: AppTheme.textSubtle.withValues(alpha: 0.6),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

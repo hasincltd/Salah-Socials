@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/app_theme.dart';
 import '../settings/settings_screen.dart';
+import '../notifications/notifications_screen.dart';
 
 // ── Hijri conversion (Fātimid algorithm) ─────────────────────────────────
 
@@ -447,11 +448,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined, size: 22),
-            onPressed: () {},
-            color: AppTheme.textSubtle,
-          ),
+          const BellIconButton(),
           IconButton(
             icon: const Icon(Icons.settings_outlined, size: 22),
             onPressed: () => Navigator.push(context,

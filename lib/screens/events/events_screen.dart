@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../theme/app_theme.dart';
+import '../notifications/notifications_screen.dart';
 
 // ── Category enum ─────────────────────────────────────────────────────────
 
@@ -368,6 +369,8 @@ class _Header extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const BellIconButton(),
+                  const SizedBox(width: 4),
                   Container(
                     width: 36,
                     height: 36,
