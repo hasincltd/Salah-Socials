@@ -1,15 +1,33 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'theme/app_theme.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'firebase_options.dart';
 import 'navigation/main_navigation.dart';
 import 'screens/notifications/notifications_screen.dart';
+import 'screens/onboarding/onboarding_screen.dart';
+import 'theme/app_theme.dart';
 import 'widgets/ss_coins_widget.dart';
+
+// Whether Firebase.initializeApp() succeeded — false until flutterfire configure runs.
+bool _firebaseReady = false;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: '.env');
   await initNotifBadge();
   await initSsCoins();
+
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    _firebaseReady = true;
+  } catch (_) {
+    // Firebase not yet configured — run flutterfire configure to enable auth.
+  }
+
   runApp(const SalahSocialsApp());
 }
 
@@ -24,7 +42,82 @@ class SalahSocialsApp extends StatelessWidget {
       theme: AppTheme.dark,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.dark,
-      home: const MainNavigation(),
+      home: const _AuthGate(),
+    );
+  }
+}
+
+// ── Auth gate ─────────────────────────────────────────────────────────────
+
+class _AuthGate extends StatefulWidget {
+  const _AuthGate();
+
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  // null = still loading, false/true = loaded
+  bool? _onboardingComplete;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOnboardingState();
+  }
+
+  Future<void> _loadOnboardingState() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _onboardingComplete = prefs.getBool('onboarding_complete') ?? false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Still loading SharedPreferences
+    if (_onboardingComplete == null) return const _SplashScreen();
+
+    // Firebase not configured — show onboarding in offline mode
+    if (!_firebaseReady) return const OnboardingScreen();
+
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const _SplashScreen();
+        }
+        final user = snapshot.data;
+        // Logged in AND previously completed onboarding → skip to home
+        if (user != null && _onboardingComplete!) {
+          return const MainNavigation();
+        }
+        // Not logged in, or logged in mid-onboarding → show onboarding flow
+        // Flutter preserves OnboardingScreen state between rebuilds because the
+        // widget type stays the same at the same tree position.
+        return const OnboardingScreen();
+      },
+    );
+  }
+}
+
+// ── Splash screen ─────────────────────────────────────────────────────────
+
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: AppTheme.background,
+      body: Center(
+        child: CircularProgressIndicator(
+          color: AppTheme.primary,
+          strokeWidth: 2,
+        ),
+      ),
     );
   }
 }
