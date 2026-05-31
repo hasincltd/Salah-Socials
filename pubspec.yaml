@@ -46,6 +46,7 @@ dependencies:
   sign_in_with_apple: ^6.1.0
   crypto: ^3.0.3
   geocoding: ^4.0.0
+  flutter_local_notifications: ^21.0.0
 
 dev_dependencies:
   flutter_test:

@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../services/traveler_alert_service.dart';
 import '../../theme/app_theme.dart';
 import '../settings/settings_screen.dart';
 import '../notifications/notifications_screen.dart';
@@ -115,13 +116,41 @@ class _MosquesScreenState extends State<MosquesScreen>
     Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted) _sheetAnim.forward();
     });
+    travelAlertTabTrigger.addListener(_onTravelAlertTap);
   }
 
   @override
   void dispose() {
+    travelAlertTabTrigger.removeListener(_onTravelAlertTap);
     _sheetAnim.dispose();
     _addressCtrl.dispose();
     super.dispose();
+  }
+
+  // Called when user taps a traveler alert notification.
+  // Re-anchors to GPS, fetches fresh results, pre-selects the mosque.
+  void _onTravelAlertTap() {
+    final mosqueId = TravelerAlertService.pendingMosqueId;
+    TravelerAlertService.pendingMosqueId = null;
+    if (mosqueId == null || !mounted) return;
+    _handleTravelAlertSelection(mosqueId);
+  }
+
+  Future<void> _handleTravelAlertSelection(String mosqueId) async {
+    _chosenLocMarker = null;
+    setState(() {
+      _anchoredToGps = true;
+      _showAddressInput = false;
+      _showSearchBanner = false;
+    });
+    await _getLocation();
+    await _fetchMosques();
+    if (!mounted) return;
+    _Mosque? match;
+    for (final m in _mosques) {
+      if (m.id == mosqueId) { match = m; break; }
+    }
+    if (match != null) await _selectMosque(match);
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────

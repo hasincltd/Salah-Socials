@@ -20,6 +20,7 @@ const _kNotifyTiming     = 'settings_notify_timing';
 const _kWarn15           = 'settings_warn_15';
 const _kCommunityNotif   = 'settings_community_notif';
 const _kStreakNotif       = 'settings_streak_notif';
+const _kTravelerAlerts   = 'settings_traveler_alerts';
 const _kDndEnabled       = 'settings_dnd_enabled';
 const _kDndStartHour     = 'settings_dnd_start_hour';
 const _kDndStartMinute   = 'settings_dnd_start_minute';
@@ -77,6 +78,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _warn15          = false;
   bool _communityNotif  = true;
   bool _streakNotif     = true;
+  bool _travelerAlerts  = true;
   bool _dndEnabled      = false;
   TimeOfDay _dndStart   = const TimeOfDay(hour: 22, minute: 0);
   TimeOfDay _dndEnd     = const TimeOfDay(hour: 6,  minute: 0);
@@ -112,6 +114,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _warn15           = p.getBool(_kWarn15)           ?? false;
       _communityNotif   = p.getBool(_kCommunityNotif)   ?? true;
       _streakNotif      = p.getBool(_kStreakNotif)       ?? true;
+      _travelerAlerts   = p.getBool(_kTravelerAlerts)   ?? true;
       _dndEnabled       = p.getBool(_kDndEnabled)       ?? false;
       _dndStart         = TimeOfDay(
         hour:   p.getInt(_kDndStartHour)   ?? 22,
@@ -788,6 +791,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (v) {
                 setState(() => _streakNotif = v);
                 _sp((p) => p.setBool(_kStreakNotif, v));
+              },
+            ),
+            _toggle(
+              title: 'Traveler Alerts',
+              subtitle: 'Nearest mosque alert when away from home near prayer time',
+              value: _travelerAlerts,
+              onChanged: (v) {
+                setState(() => _travelerAlerts = v);
+                _sp((p) => p.setBool(_kTravelerAlerts, v));
               },
             ),
             _toggle(

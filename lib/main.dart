@@ -8,6 +8,7 @@ import 'navigation/main_navigation.dart';
 import 'screens/notifications/notifications_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'theme/app_theme.dart';
+import 'services/traveler_alert_service.dart';
 import 'widgets/ss_coins_widget.dart';
 
 // Whether Firebase.initializeApp() succeeded — false until flutterfire configure runs.
@@ -18,6 +19,7 @@ void main() async {
   await dotenv.load(fileName: '.env');
   await initNotifBadge();
   await initSsCoins();
+  await TravelerAlertService.init();
 
   try {
     await Firebase.initializeApp(

@@ -4,6 +4,7 @@ import '../screens/mosques/mosques_screen.dart';
 import '../screens/events/events_screen.dart';
 import '../screens/community/community_screen.dart';
 import '../screens/profile/profile_screen.dart';
+import '../services/traveler_alert_service.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -14,6 +15,25 @@ class MainNavigation extends StatefulWidget {
 
 class _MainNavigationState extends State<MainNavigation> {
   int _currentIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    TravelerAlertService.start();
+    travelAlertTabTrigger.addListener(_onTravelAlertTap);
+  }
+
+  @override
+  void dispose() {
+    TravelerAlertService.stop();
+    travelAlertTabTrigger.removeListener(_onTravelAlertTap);
+    super.dispose();
+  }
+
+  void _onTravelAlertTap() {
+    // Switch to Mosques tab (index 1) when notification is tapped
+    setState(() => _currentIndex = 1);
+  }
 
   static const List<Widget> _screens = [
     HomeScreen(),
