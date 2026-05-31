@@ -10,7 +10,6 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_theme.dart';
 import '../settings/settings_screen.dart';
@@ -18,7 +17,7 @@ import '../notifications/notifications_screen.dart';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
-const _kSearchThresholdMiles = 10.0;
+const _kSearchThresholdMiles = 1.0;
 const _kFavouriteGreen = Color(0xFF34D399);
 
 // ── Dark map style ────────────────────────────────────────────────────────
@@ -81,6 +80,7 @@ class _MosquesScreenState extends State<MosquesScreen>
   bool _showAddressInput = false;
   final _addressCtrl = TextEditingController();
   bool _geocoding = false;
+  Marker? _chosenLocMarker; // gold pin shown while anchored to a searched address
 
   // Search-this-area banner
   bool _showSearchBanner = false;
@@ -169,14 +169,19 @@ class _MosquesScreenState extends State<MosquesScreen>
 
   void _onCameraMove(CameraPosition pos) {
     _mapCenter = pos.target;
-    if (_anchorLoc == null) return;
+  }
+
+  void _onCameraIdle() {
+    final center = _mapCenter;
+    final anchor = _anchorLoc;
+    if (center == null || anchor == null || !mounted) return;
     final distMiles = Geolocator.distanceBetween(
-          _anchorLoc!.latitude, _anchorLoc!.longitude,
-          pos.target.latitude, pos.target.longitude,
+          anchor.latitude, anchor.longitude,
+          center.latitude, center.longitude,
         ) /
         1609.34;
     final shouldShow = distMiles > _kSearchThresholdMiles;
-    if (shouldShow != _showSearchBanner && mounted) {
+    if (shouldShow != _showSearchBanner) {
       setState(() => _showSearchBanner = shouldShow);
     }
   }
@@ -265,15 +270,38 @@ class _MosquesScreenState extends State<MosquesScreen>
   // ── Geocoding (Choose Address) ─────────────────────────────────────────────
 
   Future<void> _geocodeAndReanchor(String address) async {
-    if (address.trim().isEmpty) return;
+    final query = address.trim();
+    debugPrint('[Geocode] API key prefix: ${_apiKey == null ? "NULL" : _apiKey!.substring(0, _apiKey!.length.clamp(0, 8))}');
+    if (query.isEmpty || _apiKey == null) return;
     setState(() => _geocoding = true);
     try {
-      final locations = await locationFromAddress(address.trim());
+      final uri = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+        '?address=${Uri.encodeComponent('$query, UK')}'
+        '&key=$_apiKey',
+      );
+      debugPrint('[Geocode] URL: $uri');
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      debugPrint('[Geocode] Status code: ${res.statusCode}');
+      debugPrint('[Geocode] Body: ${res.body}');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      debugPrint('[Geocode] data[status]: ${data['status']}');
+      if (data['status'] != 'OK') {
+        if (mounted) _showAddressNotFoundSnackBar();
+        return;
+      }
+      final loc =
+          (data['results'][0] as Map<String, dynamic>)['geometry']['location'];
       final latLng = LatLng(
-        locations.first.latitude,
-        locations.first.longitude,
+        (loc['lat'] as num).toDouble(),
+        (loc['lng'] as num).toDouble(),
       );
       if (mounted) {
+        _chosenLocMarker = Marker(
+          markerId: const MarkerId('_chosen_location'),
+          position: latLng,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+        );
         setState(() {
           _anchorLoc = latLng;
           _anchoredToGps = false;
@@ -281,27 +309,30 @@ class _MosquesScreenState extends State<MosquesScreen>
           _showSearchBanner = false;
         });
         _addressCtrl.clear();
+        await _fetchMosques();
+        if (!mounted) return;
         final ctrl = await _mapCtrl.future;
         ctrl.animateCamera(CameraUpdate.newLatLngZoom(latLng, 14));
-        await _fetchMosques();
         if (mounted && _mosques.isEmpty) _showNoMosquesDialog();
       }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-            'Address not found — please try a different postcode or address',
-            style: GoogleFonts.outfit(color: AppTheme.textPrimary),
-          ),
-          backgroundColor: AppTheme.surface,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ));
-      }
+    } catch (e) {
+      debugPrint('[Geocode] Exception: $e');
+      if (mounted) _showAddressNotFoundSnackBar();
     } finally {
       if (mounted) setState(() => _geocoding = false);
     }
+  }
+
+  void _showAddressNotFoundSnackBar() {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+        'Address not found — please try a different postcode or address',
+        style: GoogleFonts.outfit(color: AppTheme.textPrimary),
+      ),
+      backgroundColor: AppTheme.surface,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
   }
 
   // ── Search this area ──────────────────────────────────────────────────────
@@ -356,6 +387,7 @@ class _MosquesScreenState extends State<MosquesScreen>
 
   Future<void> _switchToCurrentLocation() async {
     if (_userLoc == null) return;
+    _chosenLocMarker = null;
     setState(() {
       _anchorLoc = _userLoc;
       _anchoredToGps = true;
@@ -408,7 +440,14 @@ class _MosquesScreenState extends State<MosquesScreen>
       );
     });
     final markers = await Future.wait(futures);
-    if (mounted) setState(() => _markers = markers.toSet());
+    if (mounted) {
+      setState(() {
+        _markers = {
+          ...markers,
+          ?_chosenLocMarker,
+        };
+      });
+    }
   }
 
   Future<BitmapDescriptor> _makePinBitmap(
@@ -530,9 +569,10 @@ class _MosquesScreenState extends State<MosquesScreen>
   }
 
   void _locateMe() async {
-    if (_userLoc == null) return;
+    final loc = _anchoredToGps ? _userLoc : _anchorLoc;
+    if (loc == null) return;
     final c = await _mapCtrl.future;
-    c.animateCamera(CameraUpdate.newLatLngZoom(_userLoc!, 14));
+    c.animateCamera(CameraUpdate.newLatLngZoom(loc, 14));
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -577,17 +617,14 @@ class _MosquesScreenState extends State<MosquesScreen>
                   style: _kMapStyle,
                   onMapCreated: _mapCtrl.complete,
                   onCameraMove: _onCameraMove,
+                  onCameraIdle: _onCameraIdle,
                   markers: _markers,
                   myLocationEnabled: true,
                   myLocationButtonEnabled: false,
                   zoomControlsEnabled: false,
                   compassEnabled: false,
                   mapToolbarEnabled: false,
-                  padding: EdgeInsets.only(
-                    top: topPad + kToolbarHeight,
-                    bottom: sheetH + 48,
-                    right: 64,
-                  ),
+                  padding: EdgeInsets.zero,
                 ),
 
                 // ── Location bar + search banner (top-left overlay) ────
