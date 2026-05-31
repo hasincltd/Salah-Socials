@@ -571,20 +571,50 @@ class _MosquesScreenState extends State<MosquesScreen>
 
   Future<void> _getDirections() async {
     final mosque = _selected;
-    if (mosque == null) return;
-    final lat = mosque.location.latitude;
-    final lng = mosque.location.longitude;
-    final name = Uri.encodeComponent(mosque.name);
-    final appleUri =
-        Uri.parse('maps://?q=$name&ll=$lat,$lng&dirflg=d');
-    final googleUri = Uri.parse(
-        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng'
-        '&destination_place_id=${mosque.id}');
-    if (await canLaunchUrl(appleUri)) {
-      await launchUrl(appleUri);
+    if (mosque == null || !mounted) return;
+    final mLat = mosque.location.latitude;
+    final mLng = mosque.location.longitude;
+
+    // Origin: chosen address when in address mode, GPS otherwise
+    final origin = _anchoredToGps ? _userLoc : _anchorLoc;
+    final oLat   = origin?.latitude;
+    final oLng   = origin?.longitude;
+
+    final Uri appleUri;
+    final Uri googleUri;
+    if (oLat != null && oLng != null) {
+      appleUri  = Uri.parse(
+          'maps://maps.apple.com/?saddr=$oLat,$oLng&daddr=$mLat,$mLng');
+      googleUri = Uri.parse(
+          'comgooglemaps://?saddr=$oLat,$oLng&daddr=$mLat,$mLng'
+          '&directionsmode=walking');
     } else {
-      await launchUrl(googleUri, mode: LaunchMode.externalApplication);
+      appleUri  = Uri.parse('maps://maps.apple.com/?daddr=$mLat,$mLng');
+      googleUri = Uri.parse(
+          'comgooglemaps://?daddr=$mLat,$mLng&directionsmode=walking');
     }
+    // Waze does not support a custom origin — it always routes from current GPS
+    final wazeUri = Uri.parse('waze://?ll=$mLat,$mLng&navigate=yes');
+
+    final googleAvailable = await canLaunchUrl(googleUri);
+    final wazeAvailable   = await canLaunchUrl(wazeUri);
+
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => _DirectionsSheet(
+        appleUri: appleUri,
+        googleUri: googleUri,
+        wazeUri: wazeUri,
+        googleAvailable: googleAvailable,
+        wazeAvailable: wazeAvailable,
+        usingCustomOrigin: !_anchoredToGps && oLat != null,
+      ),
+    );
   }
 
   void _zoomIn() async {
@@ -1429,6 +1459,176 @@ class _PrayerChip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Directions action sheet ───────────────────────────────────────────────
+
+class _DirectionsSheet extends StatelessWidget {
+  final Uri appleUri;
+  final Uri googleUri;
+  final Uri wazeUri;
+  final bool googleAvailable;
+  final bool wazeAvailable;
+  final bool usingCustomOrigin;
+
+  const _DirectionsSheet({
+    required this.appleUri,
+    required this.googleUri,
+    required this.wazeUri,
+    required this.googleAvailable,
+    required this.wazeAvailable,
+    required this.usingCustomOrigin,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFF2A3A5A),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Text(
+              'Get Directions',
+              style: GoogleFonts.outfit(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _DirectionOption(
+              icon: Icons.map_rounded,
+              label: 'Apple Maps',
+              available: true,
+              onTap: () {
+                Navigator.pop(context);
+                launchUrl(appleUri);
+              },
+            ),
+            const SizedBox(height: 8),
+            _DirectionOption(
+              icon: Icons.navigation_rounded,
+              label: 'Google Maps',
+              available: googleAvailable,
+              onTap: googleAvailable
+                  ? () {
+                      Navigator.pop(context);
+                      launchUrl(googleUri,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  : null,
+            ),
+            const SizedBox(height: 8),
+            _DirectionOption(
+              icon: Icons.route_rounded,
+              label: 'Waze',
+              subtitle: usingCustomOrigin
+                  ? 'Routes from your current GPS location'
+                  : null,
+              available: wazeAvailable,
+              onTap: wazeAvailable
+                  ? () {
+                      Navigator.pop(context);
+                      launchUrl(wazeUri,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DirectionOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? subtitle;
+  final bool available;
+  final VoidCallback? onTap;
+
+  const _DirectionOption({
+    required this.icon,
+    required this.label,
+    this.subtitle,
+    required this.available,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: available ? 1.0 : 0.35,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A2440),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF2A3A5A)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon,
+                  size: 22,
+                  color: available
+                      ? AppTheme.primary
+                      : AppTheme.textSubtle),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: GoogleFonts.outfit(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: available
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSubtle,
+                      ),
+                    ),
+                    if (subtitle != null)
+                      Text(
+                        subtitle!,
+                        style: GoogleFonts.outfit(
+                            fontSize: 11, color: AppTheme.textSubtle),
+                      ),
+                  ],
+                ),
+              ),
+              if (!available)
+                Text(
+                  'Not installed',
+                  style: GoogleFonts.outfit(
+                      fontSize: 12, color: AppTheme.textSubtle),
+                )
+              else
+                const Icon(Icons.arrow_forward_ios_rounded,
+                    size: 14, color: AppTheme.textSubtle),
+            ],
+          ),
+        ),
       ),
     );
   }
