@@ -10,9 +10,16 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_theme.dart';
 import '../settings/settings_screen.dart';
 import '../notifications/notifications_screen.dart';
+
+// ── Constants ─────────────────────────────────────────────────────────────
+
+const _kSearchThresholdMiles = 10.0;
+const _kFavouriteGreen = Color(0xFF34D399);
 
 // ── Dark map style ────────────────────────────────────────────────────────
 
@@ -64,17 +71,30 @@ class _MosquesScreenState extends State<MosquesScreen>
     with SingleTickerProviderStateMixin {
   final _mapCtrl = Completer<GoogleMapController>();
 
-  LatLng? _userLoc;
+  // Location state
+  LatLng? _userLoc;    // actual GPS position
+  LatLng? _anchorLoc;  // search anchor (GPS or chosen address)
+  LatLng? _mapCenter;  // current map camera centre (updated via onCameraMove)
+  bool _anchoredToGps = true;
+
+  // Address-input state
+  bool _showAddressInput = false;
+  final _addressCtrl = TextEditingController();
+  bool _geocoding = false;
+
+  // Search-this-area banner
+  bool _showSearchBanner = false;
+
+  // Mosque data
   List<_Mosque> _mosques = [];
   _Mosque? _selected;
   Set<Marker> _markers = {};
-
-  double _radiusMi = 1.0;
-  static const _radii = [0.5, 1.0, 5.0, 10.0];
-
   Set<String> _savedIds = {};
   bool _loadingMosques = false;
   String? _apiKey;
+
+  double _radiusMi = 1.0;
+  static const _radii = [0.5, 1.0, 5.0, 10.0];
 
   late final AnimationController _sheetAnim;
   late final Animation<Offset> _sheetSlide;
@@ -89,9 +109,9 @@ class _MosquesScreenState extends State<MosquesScreen>
         vsync: this, duration: const Duration(milliseconds: 420));
     _sheetSlide = Tween<Offset>(
             begin: const Offset(0, 1), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _sheetAnim, curve: Curves.easeOutCubic));
+        .animate(
+            CurvedAnimation(parent: _sheetAnim, curve: Curves.easeOutCubic));
     _init();
-    // Sheet slides in on screen entry regardless of mosque data
     Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted) _sheetAnim.forward();
     });
@@ -100,6 +120,7 @@ class _MosquesScreenState extends State<MosquesScreen>
   @override
   void dispose() {
     _sheetAnim.dispose();
+    _addressCtrl.dispose();
     super.dispose();
   }
 
@@ -125,26 +146,53 @@ class _MosquesScreenState extends State<MosquesScreen>
               const LocationSettings(accuracy: LocationAccuracy.high),
         ).timeout(const Duration(seconds: 8));
         if (mounted) {
-          setState(() => _userLoc = LatLng(pos.latitude, pos.longitude));
+          setState(() {
+            _userLoc = LatLng(pos.latitude, pos.longitude);
+            _anchorLoc = _userLoc;
+            _mapCenter = _userLoc;
+          });
         }
         return;
       }
     } catch (_) {}
     // Fallback: London
-    if (mounted) setState(() => _userLoc = const LatLng(51.5074, -0.1278));
+    if (mounted) {
+      setState(() {
+        _userLoc = const LatLng(51.5074, -0.1278);
+        _anchorLoc = _userLoc;
+        _mapCenter = _userLoc;
+      });
+    }
+  }
+
+  // ── Camera tracking ───────────────────────────────────────────────────────
+
+  void _onCameraMove(CameraPosition pos) {
+    _mapCenter = pos.target;
+    if (_anchorLoc == null) return;
+    final distMiles = Geolocator.distanceBetween(
+          _anchorLoc!.latitude, _anchorLoc!.longitude,
+          pos.target.latitude, pos.target.longitude,
+        ) /
+        1609.34;
+    final shouldShow = distMiles > _kSearchThresholdMiles;
+    if (shouldShow != _showSearchBanner && mounted) {
+      setState(() => _showSearchBanner = shouldShow);
+    }
   }
 
   // ── API calls ─────────────────────────────────────────────────────────────
 
   Future<void> _fetchMosques() async {
-    if (_userLoc == null || _apiKey == null) return;
+    final center = _anchorLoc ?? _userLoc;
+    if (center == null || _apiKey == null) return;
     if (mounted) setState(() => _loadingMosques = true);
 
     try {
       final radiusM = (_radiusMi * 1609.34).round();
       final uri = Uri.parse(
         'https://maps.googleapis.com/maps/api/place/nearbysearch/json'
-        '?location=${_userLoc!.latitude},${_userLoc!.longitude}'
+        '?location=${center.latitude},${center.longitude}'
         '&radius=$radiusM&type=mosque&key=$_apiKey',
       );
       final res = await http.get(uri).timeout(const Duration(seconds: 10));
@@ -158,7 +206,7 @@ class _MosquesScreenState extends State<MosquesScreen>
         final latLng = LatLng(
             (loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble());
         final distM = Geolocator.distanceBetween(
-          _userLoc!.latitude, _userLoc!.longitude,
+          center.latitude, center.longitude,
           latLng.latitude, latLng.longitude,
         );
         return _Mosque(
@@ -175,13 +223,9 @@ class _MosquesScreenState extends State<MosquesScreen>
         _mosques = mosques;
         await _buildMarkers();
         setState(() {
-          _selected = _mosques.isNotEmpty ? _mosques[0] : null;
+          _selected = null;
           _loadingMosques = false;
         });
-        if (_selected != null) {
-          _fetchPrayerTimes(_selected!);
-          _animateCameraTo(_selected!.location);
-        }
       }
     } catch (_) {
       if (mounted) setState(() => _loadingMosques = false);
@@ -202,7 +246,8 @@ class _MosquesScreenState extends State<MosquesScreen>
       final timings =
           jsonDecode(res.body)['data']['timings'] as Map<String, dynamic>;
       final times = {
-        for (final name in _prayerNames) name: _fmt24to12(timings[name] as String)
+        for (final name in _prayerNames)
+          name: _fmt24to12(timings[name] as String)
       };
       if (mounted) setState(() => mosque.prayerTimes = times);
     } catch (_) {}
@@ -217,23 +262,142 @@ class _MosquesScreenState extends State<MosquesScreen>
     return '$h12:$m $period';
   }
 
+  // ── Geocoding (Choose Address) ─────────────────────────────────────────────
+
+  Future<void> _geocodeAndReanchor(String address) async {
+    if (address.trim().isEmpty) return;
+    setState(() => _geocoding = true);
+    try {
+      final locations = await locationFromAddress(address.trim());
+      final latLng = LatLng(
+        locations.first.latitude,
+        locations.first.longitude,
+      );
+      if (mounted) {
+        setState(() {
+          _anchorLoc = latLng;
+          _anchoredToGps = false;
+          _showAddressInput = false;
+          _showSearchBanner = false;
+        });
+        _addressCtrl.clear();
+        final ctrl = await _mapCtrl.future;
+        ctrl.animateCamera(CameraUpdate.newLatLngZoom(latLng, 14));
+        await _fetchMosques();
+        if (mounted && _mosques.isEmpty) _showNoMosquesDialog();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            'Address not found — please try a different postcode or address',
+            style: GoogleFonts.outfit(color: AppTheme.textPrimary),
+          ),
+          backgroundColor: AppTheme.surface,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _geocoding = false);
+    }
+  }
+
+  // ── Search this area ──────────────────────────────────────────────────────
+
+  Future<void> _searchThisArea() async {
+    final center = _mapCenter;
+    if (center == null) return;
+    setState(() {
+      _anchorLoc = center;
+      _anchoredToGps = false;
+      _showSearchBanner = false;
+    });
+    await _fetchMosques();
+    if (mounted && _mosques.isEmpty && !_loadingMosques) {
+      _showNoMosquesDialog();
+    }
+  }
+
+  void _showNoMosquesDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'No Mosques Found in This Area',
+          style: GoogleFonts.outfit(
+              color: AppTheme.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          'No mosques were found nearby. Try expanding your radius or searching a different location.',
+          style: GoogleFonts.outfit(
+              color: AppTheme.textSubtle, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('OK',
+                style: GoogleFonts.outfit(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Location controls ─────────────────────────────────────────────────────
+
+  Future<void> _switchToCurrentLocation() async {
+    if (_userLoc == null) return;
+    setState(() {
+      _anchorLoc = _userLoc;
+      _anchoredToGps = true;
+      _showAddressInput = false;
+      _showSearchBanner = false;
+    });
+    _addressCtrl.clear();
+    final ctrl = await _mapCtrl.future;
+    ctrl.animateCamera(CameraUpdate.newLatLngZoom(_userLoc!, 14));
+    await _fetchMosques();
+  }
+
+  // ── Radius change ─────────────────────────────────────────────────────────
+
+  Future<void> _onRadiusChanged(double r) async {
+    setState(() => _radiusMi = r);
+    await _fetchMosques();
+    final loc = _anchorLoc ?? _userLoc;
+    if (loc == null) return;
+    final ctrl = await _mapCtrl.future;
+    ctrl.animateCamera(CameraUpdate.newLatLngZoom(loc, 14));
+  }
+
   // ── Markers ───────────────────────────────────────────────────────────────
 
   Future<void> _buildMarkers() async {
     if (!mounted) return;
     final dpr = MediaQuery.of(context).devicePixelRatio;
-    final futures = _mosques.asMap().entries.map((e) async {
-      final i = e.key;
-      final mosque = e.value;
+    final futures = _mosques.map((mosque) async {
       final isSaved = _savedIds.contains(mosque.id);
+      final isSelected = _selected?.id == mosque.id;
+
+      // Pin colour: green (saved) > gold (selected) > grey (default)
       final Color bg;
       if (isSaved) {
-        bg = AppTheme.accent;
-      } else if (i == 0) {
+        bg = _kFavouriteGreen;
+      } else if (isSelected) {
         bg = AppTheme.primary;
       } else {
         bg = const Color(0xFF5A6A85);
       }
+
       final icon = await _makePinBitmap(mosque.name, bg, dpr);
       return Marker(
         markerId: MarkerId(mosque.id),
@@ -261,9 +425,7 @@ class _MosquesScreenState extends State<MosquesScreen>
       text: TextSpan(
         text: short,
         style: const TextStyle(
-            fontSize: fs,
-            color: Colors.white,
-            fontWeight: FontWeight.w600),
+            fontSize: fs, color: Colors.white, fontWeight: FontWeight.w600),
       ),
       textDirection: ui.TextDirection.ltr,
     )..layout();
@@ -303,8 +465,8 @@ class _MosquesScreenState extends State<MosquesScreen>
 
     final totalH = bh + tailH;
     final pic = recorder.endRecording();
-    final img = await pic.toImage(
-        (bw * dpr).ceil(), (totalH * dpr).ceil());
+    final img =
+        await pic.toImage((bw * dpr).ceil(), (totalH * dpr).ceil());
     final bd = await img.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.bytes(bd!.buffer.asUint8List(),
         imagePixelRatio: dpr);
@@ -314,6 +476,8 @@ class _MosquesScreenState extends State<MosquesScreen>
 
   Future<void> _selectMosque(_Mosque mosque) async {
     setState(() => _selected = mosque);
+    // Rebuild markers so previous pin returns to default/green and new is gold
+    await _buildMarkers();
     _animateCameraTo(mosque.location);
     if (mosque.prayerTimes.isEmpty) _fetchPrayerTimes(mosque);
   }
@@ -404,7 +568,7 @@ class _MosquesScreenState extends State<MosquesScreen>
               child: CircularProgressIndicator(color: AppTheme.primary))
           : Stack(
               children: [
-                // Map
+                // ── Map ──────────────────────────────────────────────────
                 GoogleMap(
                   initialCameraPosition: CameraPosition(
                     target: _userLoc!,
@@ -412,6 +576,7 @@ class _MosquesScreenState extends State<MosquesScreen>
                   ),
                   style: _kMapStyle,
                   onMapCreated: _mapCtrl.complete,
+                  onCameraMove: _onCameraMove,
                   markers: _markers,
                   myLocationEnabled: true,
                   myLocationButtonEnabled: false,
@@ -424,9 +589,50 @@ class _MosquesScreenState extends State<MosquesScreen>
                     right: 64,
                   ),
                 ),
-                // Map controls
+
+                // ── Location bar + search banner (top-left overlay) ────
                 Positioned(
-                  top: topPad + kToolbarHeight + 16,
+                  top: topPad + kToolbarHeight + 8,
+                  left: 16,
+                  right: 72,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Location source pills
+                      _LocationBar(
+                        anchoredToGps: _anchoredToGps,
+                        showAddressInput: _showAddressInput,
+                        onCurrentLocation: _switchToCurrentLocation,
+                        onChooseAddress: () => setState(() {
+                          _showAddressInput = !_showAddressInput;
+                        }),
+                      ),
+                      // Address input panel
+                      if (_showAddressInput) ...[
+                        const SizedBox(height: 8),
+                        _AddressInputPanel(
+                          controller: _addressCtrl,
+                          loading: _geocoding,
+                          onSubmit: () =>
+                              _geocodeAndReanchor(_addressCtrl.text),
+                        ),
+                      ],
+                      // Search this area banner
+                      if (_showSearchBanner) ...[
+                        const SizedBox(height: 8),
+                        Center(
+                          child: _SearchThisAreaBanner(
+                              onTap: _searchThisArea),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                // ── Map controls (top-right) ──────────────────────────
+                Positioned(
+                  top: topPad + kToolbarHeight + 8,
                   right: 16,
                   child: _MapControls(
                     onZoomIn: _zoomIn,
@@ -434,7 +640,8 @@ class _MosquesScreenState extends State<MosquesScreen>
                     onLocate: _locateMe,
                   ),
                 ),
-                // Bottom panel
+
+                // ── Bottom panel ──────────────────────────────────────
                 Positioned(
                   left: 0,
                   right: 0,
@@ -448,10 +655,7 @@ class _MosquesScreenState extends State<MosquesScreen>
                       loading: _loadingMosques,
                       radiusMi: _radiusMi,
                       radii: _radii,
-                      onRadiusChanged: (r) {
-                        setState(() => _radiusMi = r);
-                        _fetchMosques();
-                      },
+                      onRadiusChanged: _onRadiusChanged,
                       onToggleSave: _toggleSave,
                       onGetDirections: _getDirections,
                       onMosqueTap: _selectMosque,
@@ -459,7 +663,8 @@ class _MosquesScreenState extends State<MosquesScreen>
                     ),
                   ),
                 ),
-                // Loading overlay
+
+                // ── Loading overlay ───────────────────────────────────
                 if (_loadingMosques)
                   Positioned(
                     bottom: sheetH + 60,
@@ -484,7 +689,7 @@ class _MosquesScreenState extends State<MosquesScreen>
                                     strokeWidth: 2)),
                             const SizedBox(width: 10),
                             Text('Finding mosques…',
-                                style: TextStyle(
+                                style: GoogleFonts.outfit(
                                     color: AppTheme.textSubtle,
                                     fontSize: 13)),
                           ],
@@ -494,6 +699,231 @@ class _MosquesScreenState extends State<MosquesScreen>
                   ),
               ],
             ),
+    );
+  }
+}
+
+// ── Location bar ──────────────────────────────────────────────────────────
+
+class _LocationBar extends StatelessWidget {
+  final bool anchoredToGps;
+  final bool showAddressInput;
+  final VoidCallback onCurrentLocation;
+  final VoidCallback onChooseAddress;
+
+  const _LocationBar({
+    required this.anchoredToGps,
+    required this.showAddressInput,
+    required this.onCurrentLocation,
+    required this.onChooseAddress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF1F2D4A), width: 1),
+        boxShadow: const [
+          BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2))
+        ],
+      ),
+      child: Row(
+        children: [
+          // Current Location pill
+          Expanded(
+            child: GestureDetector(
+              onTap: onCurrentLocation,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                decoration: BoxDecoration(
+                  color: anchoredToGps
+                      ? AppTheme.primary.withValues(alpha: 0.14)
+                      : Colors.transparent,
+                  borderRadius: const BorderRadius.horizontal(
+                      left: Radius.circular(20)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.my_location_rounded,
+                        size: 14,
+                        color: anchoredToGps
+                            ? AppTheme.primary
+                            : AppTheme.textSubtle),
+                    const SizedBox(width: 5),
+                    Text('Current Location',
+                        style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            fontWeight: anchoredToGps
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                            color: anchoredToGps
+                                ? AppTheme.primary
+                                : AppTheme.textSubtle)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Divider
+          Container(
+              width: 1,
+              height: 22,
+              color: const Color(0xFF1F2D4A)),
+          // Choose Address pill
+          Expanded(
+            child: GestureDetector(
+              onTap: onChooseAddress,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                decoration: BoxDecoration(
+                  color: !anchoredToGps || showAddressInput
+                      ? AppTheme.primary.withValues(alpha: 0.14)
+                      : Colors.transparent,
+                  borderRadius: const BorderRadius.horizontal(
+                      right: Radius.circular(20)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.search_rounded,
+                        size: 14,
+                        color: !anchoredToGps || showAddressInput
+                            ? AppTheme.primary
+                            : AppTheme.textSubtle),
+                    const SizedBox(width: 5),
+                    Text('Choose Address',
+                        style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            fontWeight: !anchoredToGps || showAddressInput
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                            color: !anchoredToGps || showAddressInput
+                                ? AppTheme.primary
+                                : AppTheme.textSubtle)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Address input panel ───────────────────────────────────────────────────
+
+class _AddressInputPanel extends StatelessWidget {
+  final TextEditingController controller;
+  final bool loading;
+  final VoidCallback onSubmit;
+
+  const _AddressInputPanel({
+    required this.controller,
+    required this.loading,
+    required this.onSubmit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF1F2D4A), width: 1),
+        boxShadow: const [
+          BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2))
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => onSubmit(),
+              style: GoogleFonts.outfit(
+                  color: AppTheme.textPrimary, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'Enter postcode or address…',
+                hintStyle: GoogleFonts.outfit(
+                    color: AppTheme.textSubtle, fontSize: 13),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                isDense: true,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: loading ? null : onSubmit,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: CircularProgressIndicator(
+                          color: AppTheme.primary, strokeWidth: 2),
+                    )
+                  : const Icon(Icons.arrow_forward_rounded,
+                      color: AppTheme.primary, size: 18),
+            ),
+          ),
+          const SizedBox(width: 6),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Search this area banner ───────────────────────────────────────────────
+
+class _SearchThisAreaBanner extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _SearchThisAreaBanner({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.primary, width: 1.5),
+          boxShadow: const [
+            BoxShadow(
+                color: Colors.black45,
+                blurRadius: 10,
+                offset: Offset(0, 3))
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.search_rounded,
+                color: AppTheme.primary, size: 15),
+            const SizedBox(width: 6),
+            Text('Search this area',
+                style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary)),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -515,7 +945,9 @@ class _MapControls extends StatelessWidget {
         const SizedBox(height: 6),
         _MapBtn(icon: Icons.remove, onTap: onZoomOut),
         const SizedBox(height: 10),
-        _MapBtn(icon: Icons.my_location_rounded, onTap: onLocate,
+        _MapBtn(
+            icon: Icons.my_location_rounded,
+            onTap: onLocate,
             color: AppTheme.primary),
       ],
     );
@@ -539,9 +971,11 @@ class _MapBtn extends StatelessWidget {
           color: AppTheme.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: const Color(0xFF1F2D4A)),
-          boxShadow: [
+          boxShadow: const [
             BoxShadow(
-                color: Colors.black38, blurRadius: 8, offset: const Offset(0, 2))
+                color: Colors.black38,
+                blurRadius: 8,
+                offset: Offset(0, 2))
           ],
         ),
         child: Icon(icon, size: 20, color: color ?? AppTheme.textPrimary),
@@ -611,7 +1045,7 @@ class _BottomPanel extends StatelessWidget {
                 mosques.isEmpty
                     ? 'No mosques found in this area'
                     : 'Tap a pin to view details',
-                style: TextStyle(color: AppTheme.textSubtle),
+                style: GoogleFonts.outfit(color: AppTheme.textSubtle),
               ),
             )
           else if (selected != null)
@@ -669,7 +1103,7 @@ class _RadiusPills extends StatelessWidget {
               ),
               child: Text(
                 label,
-                style: TextStyle(
+                style: GoogleFonts.outfit(
                   fontSize: 12,
                   fontWeight:
                       selected ? FontWeight.w600 : FontWeight.w400,
@@ -715,7 +1149,6 @@ class _MosqueDetail extends StatelessWidget {
   }
 
   DateTime _parseTime(String t, DateTime now) {
-    // e.g. "5:30 AM"
     final fmt = DateFormat('h:mm a');
     final parsed = fmt.parse(t);
     return DateTime(now.year, now.month, now.day, parsed.hour, parsed.minute);
@@ -743,7 +1176,7 @@ class _MosqueDetail extends StatelessWidget {
                   children: [
                     Text(
                       mosque.name,
-                      style: const TextStyle(
+                      style: GoogleFonts.outfit(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.textPrimary,
@@ -759,7 +1192,7 @@ class _MosqueDetail extends StatelessWidget {
                         const SizedBox(width: 4),
                         Text(
                           distStr,
-                          style: const TextStyle(
+                          style: GoogleFonts.outfit(
                             fontSize: 13,
                             color: AppTheme.accent,
                             fontWeight: FontWeight.w500,
@@ -772,7 +1205,7 @@ class _MosqueDetail extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
                           mosque.vicinity,
-                          style: TextStyle(
+                          style: GoogleFonts.outfit(
                               fontSize: 11,
                               color: AppTheme.textSubtle
                                   .withValues(alpha: 0.7)),
@@ -806,8 +1239,8 @@ class _MosqueDetail extends StatelessWidget {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: prayerNames.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
+                separatorBuilder: (context, i) => const SizedBox(width: 8),
+                itemBuilder: (context, i) {
                   final name = prayerNames[i];
                   final time = mosque.prayerTimes[name] ?? '—';
                   final isActive = name == activePrayer;
@@ -838,19 +1271,20 @@ class _MosqueDetail extends StatelessWidget {
                 child: ElevatedButton.icon(
                   onPressed: onGetDirections,
                   icon: const Icon(Icons.directions_rounded, size: 18),
-                  label: const Text('Get Directions'),
+                  label: Text('Get Directions',
+                      style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.w600, fontSize: 14)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primary,
                     foregroundColor: AppTheme.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
-                    textStyle: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ),
               ),
               const SizedBox(width: 10),
+              // Favourite star — green when saved
               GestureDetector(
                 onTap: onToggleSave,
                 child: AnimatedContainer(
@@ -859,19 +1293,19 @@ class _MosqueDetail extends StatelessWidget {
                   height: 50,
                   decoration: BoxDecoration(
                     color: isSaved
-                        ? AppTheme.primary.withValues(alpha: 0.15)
+                        ? _kFavouriteGreen.withValues(alpha: 0.15)
                         : const Color(0xFF1A2440),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: isSaved
-                          ? AppTheme.primary
+                          ? _kFavouriteGreen
                           : const Color(0xFF2A3A5A),
                       width: isSaved ? 1.5 : 1,
                     ),
                   ),
                   child: Icon(
                     isSaved ? Icons.star_rounded : Icons.star_outline_rounded,
-                    color: isSaved ? AppTheme.primary : AppTheme.textSubtle,
+                    color: isSaved ? _kFavouriteGreen : AppTheme.textSubtle,
                     size: 24,
                   ),
                 ),
@@ -912,7 +1346,7 @@ class _PrayerChip extends StatelessWidget {
         children: [
           Text(
             name,
-            style: TextStyle(
+            style: GoogleFonts.outfit(
               fontSize: 10,
               fontWeight: FontWeight.w600,
               color: isActive ? AppTheme.primary : AppTheme.textSubtle,
@@ -922,7 +1356,7 @@ class _PrayerChip extends StatelessWidget {
           const SizedBox(height: 3),
           Text(
             time,
-            style: TextStyle(
+            style: GoogleFonts.outfit(
               fontSize: 11,
               fontWeight: FontWeight.w500,
               color: isActive ? AppTheme.primary : AppTheme.textPrimary,
