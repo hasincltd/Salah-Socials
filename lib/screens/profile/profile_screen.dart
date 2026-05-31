@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/app_theme.dart';
 import '../settings/settings_screen.dart';
 import '../notifications/notifications_screen.dart';
+import '../../widgets/ss_coins_widget.dart';
 
 // ── SharedPreferences keys ────────────────────────────────────────────────
 
@@ -172,7 +173,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 14),
             // ── 2. Name + handle + bio ───────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -202,6 +202,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _TabPills(tabIndex: _tabIndex, onSwitch: _switchTab),
+            ),
+            const SizedBox(height: 12),
+            // ── SS Coins — persistent above tab content ──────────────────
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: SSCoinWidget(),
             ),
             const SizedBox(height: 10),
             // ── 4. PageView ──────────────────────────────────────────────

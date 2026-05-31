@@ -533,7 +533,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       next = null;
     }
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, kToolbarHeight + 8, 20, 32),
+      padding: const EdgeInsets.fromLTRB(20, kToolbarHeight, 20, 32),
       children: [
         _GreetingRow(greeting: _greeting),
         const SizedBox(height: 22),
