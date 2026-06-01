@@ -112,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   static const _kReviveRestoredCount = 'streak_revive_restored_count';
   static const _kSsCoins             = 'ss_coin_balance';
   static const _kReviveCost          = 250;
-  static const _kSsCoinsDefault      = 1000;
+  static const _kSsCoinsDefault      = 0;
 
   static const _fallbackLat = 51.5074;
   static const _fallbackLon = -0.1278;

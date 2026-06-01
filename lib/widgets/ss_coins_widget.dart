@@ -6,14 +6,36 @@ import '../theme/app_theme.dart';
 
 // ── Global balance state ──────────────────────────────────────────────────
 
-const _kSsCoinsKey     = 'ss_coin_balance';
-const _kSsCoinsDefault = 1000;
+const _kSsCoinsKey    = 'ss_coin_balance';
+const _kTotalScoreKey = 'total_streak_score';
 
-final ValueNotifier<int> ssCoinBalance = ValueNotifier<int>(_kSsCoinsDefault);
+final ValueNotifier<int> ssCoinBalance = ValueNotifier<int>(0);
+
+int _computeTotalScore(SharedPreferences prefs) {
+  const names = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+  final dates = <String>{};
+  for (final k in prefs.getKeys()) {
+    if (k.startsWith('prayer_log_')) {
+      final parts = k.split('_');
+      if (parts.length == 4) dates.add(parts[2]);
+    }
+  }
+  int total = 0;
+  for (final dk in dates) {
+    if (names.every((n) => prefs.getBool('prayer_log_${dk}_$n') == true)) {
+      total++;
+    }
+  }
+  return total;
+}
 
 Future<void> initSsCoins() async {
   final prefs = await SharedPreferences.getInstance();
-  ssCoinBalance.value = prefs.getInt(_kSsCoinsKey) ?? _kSsCoinsDefault;
+  final total = _computeTotalScore(prefs);
+  await prefs.setInt(_kTotalScoreKey, total);
+  final balance = total * 5;
+  await prefs.setInt(_kSsCoinsKey, balance);
+  ssCoinBalance.value = balance;
 }
 
 // ── Widget ────────────────────────────────────────────────────────────────

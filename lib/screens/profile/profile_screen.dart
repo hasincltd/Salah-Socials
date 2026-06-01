@@ -21,7 +21,7 @@ part 'widgets/badges_section.dart';
 const _kDisplayName    = 'settings_display_name';
 const _kUsername       = 'settings_username';
 const _kSsCoins        = 'ss_coin_balance';
-const _kSsCoinsDefault = 1000;
+const _kSsCoinsDefault = 0;
 const _prayerNames     = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
 // ── Screen ────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _username    = 'hasin';
   int    _streakDays  = 0;
   int    _ssCoins     = _kSsCoinsDefault;
-  static const int _friendsCount = 6;
+  int    _friendsCount = 0;
 
   late final PageController _pageController;
   int _tabIndex = 0;
@@ -58,10 +58,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadStats() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _displayName = prefs.getString(_kDisplayName) ?? 'Hasin';
-      _username    = prefs.getString(_kUsername) ?? 'hasin';
-      _ssCoins     = prefs.getInt(_kSsCoins) ?? _kSsCoinsDefault;
-      _streakDays  = _computeStreak(prefs);
+      _displayName  = prefs.getString(_kDisplayName) ?? 'Hasin';
+      _username     = prefs.getString(_kUsername) ?? 'hasin';
+      _ssCoins      = prefs.getInt(_kSsCoins) ?? _kSsCoinsDefault;
+      _streakDays   = _computeStreak(prefs);
+      _friendsCount = prefs.getInt('friend_count') ?? 0;
     });
   }
 
