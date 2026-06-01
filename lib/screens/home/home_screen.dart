@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/app_theme.dart';
@@ -16,6 +16,8 @@ part 'widgets/greeting_row.dart';
 part 'widgets/next_prayer_card.dart';
 part 'widgets/prayer_list.dart';
 part 'widgets/streak_chip.dart';
+part 'widgets/home_painters.dart';
+part 'widgets/streak_revive_dialog.dart';
 
 // ── Hijri conversion (Fātimid algorithm) ─────────────────────────────────
 
@@ -230,7 +232,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final dk = _todayKey();
     final logs = {for (final n in _names) n: prefs.getBool(_prefKey(dk, n)) ?? false};
 
-    // Current-week dots: Monday of this week → Sunday. Future days stay false.
     final now = DateTime.now();
     final monday = now.subtract(Duration(days: now.weekday - 1));
     final weekLogs = <int, bool>{};
@@ -251,8 +252,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   int _computeStreak(SharedPreferences prefs) {
     var day = DateTime.now();
-    // If today isn't fully logged yet, start the count from yesterday so an
-    // in-progress day doesn't wipe out the existing streak.
     final todayDk = DateFormat('yyyy-MM-dd').format(day);
     if (!_names.every((n) => prefs.getBool(_prefKey(todayDk, n)) == true)) {
       day = day.subtract(const Duration(days: 1));
@@ -301,7 +300,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final restoredCount = prefs.getInt(_kReviveRestoredCount) ?? 0;
 
     if (_streakDays > 0) {
-      // Natural streak recovered — retire the revive override once caught up.
       if (restoredCount > 0 && _streakDays >= restoredCount) {
         await prefs.remove(_kReviveRestoredCount);
         await prefs.remove(_kReviveLostAtMs);
@@ -314,16 +312,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return;
     }
 
-    // Natural streak = 0.
-
-    // If revive was already used this miss window, show restored count.
     final reviveUsed = prefs.getBool(_kReviveUsed) ?? false;
     if (reviveUsed && restoredCount > 0) {
       if (mounted) setState(() => _revivedStreak = restoredCount);
       return;
     }
 
-    // Expire any stale revive window older than 24 hours.
     var lostAtMs = prefs.getInt(_kReviveLostAtMs);
     if (lostAtMs != null) {
       final age = DateTime.now()
@@ -337,14 +331,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     }
 
-    // Determine previous streak (before miss).
     final prevCount = lostAtMs != null
         ? (prefs.getInt(_kRevivePrevCount) ?? 0)
         : _computeStreakBeforeMiss(prefs);
 
-    if (prevCount == 0) return; // no streak to revive
+    if (prevCount == 0) return;
 
-    // Record new miss if not already recorded.
     if (lostAtMs == null) {
       lostAtMs = DateTime.now().millisecondsSinceEpoch;
       await prefs.setInt(_kReviveLostAtMs, lostAtMs);
@@ -352,7 +344,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       await prefs.setBool(_kReviveUsed, false);
     }
 
-    // Show popup — once per session only.
     if (_revivePopupShownThisSession) return;
     _revivePopupShownThisSession = true;
     if (mounted) setState(() => _prevStreakCount = prevCount);
@@ -464,7 +455,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ),
       body: Stack(
         children: [
-          // Starfield
           AnimatedBuilder(
             animation: _starAnim,
             builder: (_, _) => CustomPaint(
@@ -472,7 +462,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               child: const SizedBox.expand(),
             ),
           ),
-          // Mosque silhouette
           Positioned(
             bottom: 60,
             left: 0,
@@ -482,7 +471,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               size: const Size(double.infinity, 110),
             ),
           ),
-          // Crescent moon
           Positioned(
             top: 160,
             right: 28,
@@ -491,7 +479,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               size: const Size(30, 30),
             ),
           ),
-          // Content
           SafeArea(
             child: _loading
                 ? const Center(
@@ -523,8 +510,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildBody() {
-    // After all today's prayers have started (_nextIdx == -1), surface
-    // tomorrow's Fajr so the hero card is always visible.
     final _Prayer? next;
     if (_nextIdx >= 0) {
       next = _prayers[_nextIdx];
@@ -562,321 +547,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           streakDays: math.max(_streakDays, _revivedStreak),
           todayWeekday: DateTime.now().weekday,
           weekLogs: _weekLogs,
-        ),
-      ],
-    );
-  }
-}
-
-// ── Painters ──────────────────────────────────────────────────────────────
-
-class _StarfieldPainter extends CustomPainter {
-  final List<_Star> stars;
-  final double t;
-  _StarfieldPainter(this.stars, this.t);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint();
-    for (final s in stars) {
-      final phase = (t + s.phase) % 1.0;
-      final opacity = s.maxOpacity * math.pow(math.sin(math.pi * phase), 2).toDouble();
-      p.color = Colors.white.withValues(alpha: opacity);
-      canvas.drawCircle(
-          Offset(s.x * size.width, s.y * size.height), s.size, p);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_StarfieldPainter o) => o.t != t;
-}
-
-class _MosquePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()
-      ..color = Colors.white.withValues(alpha: 0.05)
-      ..style = PaintingStyle.fill;
-
-    final w = size.width;
-    final h = size.height;
-    final cx = w / 2;
-
-    // Base
-    canvas.drawRect(Rect.fromLTWH(cx - 95, h * 0.52, 190, h * 0.48), p);
-
-    // Main dome
-    canvas.drawArc(
-      Rect.fromCenter(
-          center: Offset(cx, h * 0.52), width: 136, height: 94),
-      math.pi, math.pi, true, p,
-    );
-
-    // Side domes
-    for (final dx in [-62.0, 62.0]) {
-      canvas.drawArc(
-        Rect.fromCenter(
-            center: Offset(cx + dx, h * 0.60), width: 58, height: 42),
-        math.pi, math.pi, true, p,
-      );
-    }
-
-    // Minarets
-    for (final mx in [-132.0, 132.0]) {
-      canvas.drawRect(Rect.fromLTWH(cx + mx - 6, h * 0.08, 12, h * 0.92), p);
-      final tip = Path()
-        ..moveTo(cx + mx - 10, h * 0.08)
-        ..lineTo(cx + mx, 0)
-        ..lineTo(cx + mx + 10, h * 0.08)
-        ..close();
-      canvas.drawPath(tip, p);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_) => false;
-}
-
-class _CrescentPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()..color = Colors.white.withValues(alpha: 0.20);
-    final r = size.width / 2;
-    final outer = Path()
-      ..addOval(Rect.fromCircle(center: Offset(r, r), radius: r));
-    final inner = Path()
-      ..addOval(Rect.fromCircle(
-          center: Offset(r + r * 0.52, r - r * 0.12), radius: r * 0.80));
-    canvas.drawPath(Path.combine(PathOperation.difference, outer, inner), p);
-  }
-
-  @override
-  bool shouldRepaint(_) => false;
-}
-
-// ── Streak Revive Dialog ──────────────────────────────────────────────────
-
-class _StreakReviveDialog extends StatelessWidget {
-  final int previousStreak;
-  final int ssCoins;
-  final int reviveCost;
-  final VoidCallback onRevive;
-  final VoidCallback onDismiss;
-
-  const _StreakReviveDialog({
-    required this.previousStreak,
-    required this.ssCoins,
-    required this.reviveCost,
-    required this.onRevive,
-    required this.onDismiss,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final canAfford = ssCoins >= reviveCost;
-
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(24, 30, 24, 20),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: AppTheme.primary.withValues(alpha: 0.40),
-            width: 1.5,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primary.withValues(alpha: 0.15),
-              blurRadius: 40,
-              spreadRadius: 4,
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Flame icon
-            const Text('🔥', style: TextStyle(fontSize: 52)),
-            const SizedBox(height: 14),
-            Text(
-              'Streak Revive Available',
-              style: GoogleFonts.outfit(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.primary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'You missed a day, but your $previousStreak-day streak\ncan still be saved!',
-              style: GoogleFonts.outfit(
-                fontSize: 13,
-                color: AppTheme.textSubtle,
-                height: 1.55,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            // Before → Missed → Revived bubbles
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _StreakBubble(
-                    count: previousStreak, label: 'Before', state: _BubbleState.active),
-                _Arrow(),
-                _StreakBubble(
-                    count: 0, label: 'Missed', state: _BubbleState.missed),
-                _Arrow(),
-                _StreakBubble(
-                    count: previousStreak, label: 'Revived', state: _BubbleState.revived),
-              ],
-            ),
-            const SizedBox(height: 22),
-            // Coin balance pill
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                    color: AppTheme.primary.withValues(alpha: 0.22)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('🪙', style: TextStyle(fontSize: 14)),
-                  const SizedBox(width: 7),
-                  Text(
-                    'Balance: $ssCoins SS Coins',
-                    style: GoogleFonts.outfit(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            // Revive button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: canAfford ? onRevive : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  disabledBackgroundColor:
-                      AppTheme.primary.withValues(alpha: 0.25),
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  elevation: 0,
-                ),
-                child: Text(
-                  canAfford
-                      ? 'Revive for $reviveCost SS Coins'
-                      : 'Not enough SS Coins ($reviveCost needed)',
-                  style: GoogleFonts.outfit(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: canAfford
-                        ? AppTheme.onPrimary
-                        : AppTheme.textSubtle,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            // Dismiss
-            TextButton(
-              onPressed: onDismiss,
-              child: Text(
-                'Maybe later',
-                style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  color: AppTheme.textSubtle,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-enum _BubbleState { active, missed, revived }
-
-class _Arrow extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Icon(Icons.arrow_forward_rounded,
-            size: 18, color: AppTheme.textSubtle.withValues(alpha: 0.5)),
-      );
-}
-
-class _StreakBubble extends StatelessWidget {
-  final int count;
-  final String label;
-  final _BubbleState state;
-
-  const _StreakBubble({
-    required this.count,
-    required this.label,
-    required this.state,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final Color color;
-    switch (state) {
-      case _BubbleState.active:
-        color = AppTheme.primary;
-      case _BubbleState.missed:
-        color = AppTheme.textSubtle;
-      case _BubbleState.revived:
-        color = AppTheme.accent;
-    }
-
-    return Column(
-      children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color.withValues(alpha: 0.12),
-            border: Border.all(
-              color: color.withValues(alpha: state == _BubbleState.missed ? 0.25 : 0.5),
-              width: 1.5,
-            ),
-          ),
-          child: Center(
-            child: Text(
-              '$count',
-              style: GoogleFonts.outfit(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                color: color,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 7),
-        Text(
-          label,
-          style: GoogleFonts.outfit(
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-            color: color.withValues(alpha: 0.75),
-          ),
         ),
       ],
     );

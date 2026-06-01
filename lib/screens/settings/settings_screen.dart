@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../theme/app_theme.dart';
 
+part 'widgets/settings_widgets.dart';
+
 // ── Preference keys ───────────────────────────────────────────────────────
 
 const _kUsername         = 'settings_username';
@@ -453,143 +455,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
   }
 
-  // ── Widget helpers ────────────────────────────────────────────────────
-
-  // Gold uppercase section label.
-  Widget _header(String label) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 28, 20, 10),
-    child: Text(
-      label,
-      style: GoogleFonts.outfit(
-        fontSize: 11,
-        fontWeight: FontWeight.w800,
-        color: AppTheme.primary,
-        letterSpacing: 1.0,
-      ),
-    ),
-  );
-
-  // Rounded card container for a section's rows.
-  Widget _card(List<Widget> children) => Container(
-    margin: const EdgeInsets.symmetric(horizontal: 16),
-    decoration: BoxDecoration(
-      color: AppTheme.surface,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: const Color(0xFF1F2D4A)),
-    ),
-    child: Column(children: children),
-  );
-
-  static const _divider = Border(
-      bottom: BorderSide(color: Color(0xFF192036), width: 0.5));
-
-  // Tappable row with chevron.
-  Widget _nav({
-    required String title,
-    String? subtitle,
-    Color? titleColor,
-    bool isLast = false,
-    VoidCallback? onTap,
-  }) =>
-      GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-          decoration: BoxDecoration(border: isLast ? null : _divider),
-          child: Row(children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: GoogleFonts.outfit(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: titleColor ?? AppTheme.textPrimary)),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle,
-                        style: GoogleFonts.outfit(
-                            fontSize: 12, color: AppTheme.textSubtle)),
-                  ],
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded,
-                color: AppTheme.textSubtle.withValues(alpha: 0.5), size: 20),
-          ]),
-        ),
-      );
-
-  // Row with a toggle switch.
-  Widget _toggle({
-    required String title,
-    String? subtitle,
-    required bool value,
-    bool isLast = false,
-    required ValueChanged<bool> onChanged,
-  }) =>
-      Container(
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-        decoration: BoxDecoration(border: isLast ? null : _divider),
-        child: Row(children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: AppTheme.textPrimary)),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: GoogleFonts.outfit(
-                          fontSize: 12, color: AppTheme.textSubtle)),
-                ],
-              ],
-            ),
-          ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            thumbColor: WidgetStateProperty.resolveWith((s) =>
-                s.contains(WidgetState.selected)
-                    ? Colors.white
-                    : AppTheme.textSubtle),
-            trackColor: WidgetStateProperty.resolveWith((s) =>
-                s.contains(WidgetState.selected)
-                    ? AppTheme.accent
-                    : const Color(0xFF1F2D4A)),
-            trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
-          ),
-        ]),
-      );
-
-  // Static info row (no chevron, no tap).
-  Widget _info({
-    required String title,
-    required String value,
-    bool isLast = false,
-  }) =>
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-        decoration: BoxDecoration(border: isLast ? null : _divider),
-        child: Row(children: [
-          Expanded(
-              child: Text(title,
-                  style: GoogleFonts.outfit(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.textPrimary))),
-          Text(value,
-              style: GoogleFonts.outfit(
-                  fontSize: 13, color: AppTheme.textSubtle)),
-        ]),
-      );
-
   // ── Build ─────────────────────────────────────────────────────────────
 
   @override
@@ -613,16 +478,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         centerTitle: true,
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: Color(0xFF1A2440)),
+          child: Divider(height: 1, color: AppTheme.card),
         ),
       ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 48),
         children: [
           // ── ACCOUNT ────────────────────────────────────────────────
-          _header('ACCOUNT'),
-          _card([
-            _nav(
+          const _SectionHeader('ACCOUNT'),
+          _SettingsCard([
+            _SettingsNavRow(
               title: 'Username',
               subtitle: _username,
               onTap: () => _editDialog(
@@ -634,7 +499,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Display Name',
               subtitle: _displayName,
               onTap: () => _editDialog(
@@ -646,16 +511,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Profile Picture',
               subtitle: 'Change avatar',
               onTap: () => _snack('Profile picture upload coming soon'),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Change Password',
               onTap: () => _snack('Password change coming soon'),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Delete Account',
               titleColor: AppTheme.error,
               isLast: true,
@@ -664,14 +529,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
 
           // ── LOCATION ───────────────────────────────────────────────
-          _header('LOCATION'),
-          _card([
-            _nav(
+          const _SectionHeader('LOCATION'),
+          _SettingsCard([
+            _SettingsNavRow(
               title: 'Home Location',
               subtitle: _homeLocation.isEmpty ? 'Not set' : _homeLocation,
               onTap: _locationDialog,
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Reset to Current GPS',
               isLast: true,
               onTap: () => _snack('GPS reset coming soon'),
@@ -679,9 +544,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
 
           // ── PRAYER SETTINGS ────────────────────────────────────────
-          _header('PRAYER SETTINGS'),
-          _card([
-            _nav(
+          const _SectionHeader('PRAYER SETTINGS'),
+          _SettingsCard([
+            _SettingsNavRow(
               title: 'Calculation Method',
               subtitle: _calcMethod,
               onTap: () => _pickerSheet(
@@ -694,7 +559,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Madhab for Asr',
               subtitle: _madhab,
               isLast: true,
@@ -711,9 +576,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
 
           // ── NOTIFICATIONS ──────────────────────────────────────────
-          _header('NOTIFICATIONS'),
-          _card([
-            _toggle(
+          const _SectionHeader('NOTIFICATIONS'),
+          _SettingsCard([
+            _SettingsToggleRow(
               title: 'Fajr',
               value: _notifyFajr,
               onChanged: (v) {
@@ -721,7 +586,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kNotifyFajr, v));
               },
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Dhuhr',
               value: _notifyDhuhr,
               onChanged: (v) {
@@ -729,7 +594,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kNotifyDhuhr, v));
               },
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Asr',
               value: _notifyAsr,
               onChanged: (v) {
@@ -737,7 +602,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kNotifyAsr, v));
               },
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Maghrib',
               value: _notifyMaghrib,
               onChanged: (v) {
@@ -745,7 +610,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kNotifyMaghrib, v));
               },
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Isha',
               value: _notifyIsha,
               onChanged: (v) {
@@ -753,7 +618,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kNotifyIsha, v));
               },
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Notification Timing',
               subtitle: _notifyTiming,
               onTap: () => _pickerSheet(
@@ -766,7 +631,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: '15-Minute Warning',
               subtitle: 'Extra alert 15 min before each prayer',
               value: _warn15,
@@ -775,7 +640,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kWarn15, v));
               },
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Community Notifications',
               subtitle: 'Friend activity, events, and mentions',
               value: _communityNotif,
@@ -784,7 +649,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kCommunityNotif, v));
               },
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Streak Notifications',
               subtitle: 'Reminders to protect your streak',
               value: _streakNotif,
@@ -793,7 +658,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kStreakNotif, v));
               },
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Traveler Alerts',
               subtitle: 'Nearest mosque alert when away from home near prayer time',
               value: _travelerAlerts,
@@ -802,7 +667,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kTravelerAlerts, v));
               },
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Do Not Disturb',
               subtitle: 'Fajr overrides DND with gentle sound only',
               value: _dndEnabled,
@@ -811,7 +676,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _sp((p) => p.setBool(_kDndEnabled, v));
               },
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'DND Start',
               subtitle: _dndStart.format(context),
               onTap: () => _pickTime(
@@ -824,7 +689,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'DND End',
               subtitle: _dndEnd.format(context),
               isLast: true,
@@ -841,10 +706,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
 
           // ── SUBSCRIPTION ───────────────────────────────────────────
-          _header('SUBSCRIPTION'),
-          _card([
-            _info(title: 'Current Plan', value: 'Core'),
-            _nav(
+          const _SectionHeader('SUBSCRIPTION'),
+          _SettingsCard([
+            _SettingsInfoRow(title: 'Current Plan', value: 'Core'),
+            _SettingsNavRow(
               title: 'Upgrade to Premium',
               titleColor: AppTheme.primary,
               isLast: true,
@@ -853,9 +718,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
 
           // ── PRIVACY ────────────────────────────────────────────────
-          _header('PRIVACY'),
-          _card([
-            _nav(
+          const _SectionHeader('PRIVACY'),
+          _SettingsCard([
+            _SettingsNavRow(
               title: 'Friend Requests',
               subtitle: _friendRequests,
               onTap: () => _pickerSheet(
@@ -868,7 +733,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Profile Visibility',
               subtitle: _profileVisibility,
               onTap: () => _pickerSheet(
@@ -881,7 +746,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
             ),
-            _toggle(
+            _SettingsToggleRow(
               title: 'Leaderboard Opt-Out',
               subtitle: 'Hide your name from all leaderboards',
               value: _leaderboardOptOut,
@@ -894,18 +759,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
 
           // ── APP ────────────────────────────────────────────────────
-          _header('APP'),
-          _card([
-            _info(title: 'App Version', value: '1.0.0 (1)'),
-            _nav(
+          const _SectionHeader('APP'),
+          _SettingsCard([
+            _SettingsInfoRow(title: 'App Version', value: '1.0.0 (1)'),
+            _SettingsNavRow(
               title: 'Terms of Service',
               onTap: () => _snack('Terms of Service coming soon'),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Privacy Policy',
               onTap: () => _snack('Privacy Policy coming soon'),
             ),
-            _nav(
+            _SettingsNavRow(
               title: 'Contact Support',
               isLast: true,
               onTap: () async {

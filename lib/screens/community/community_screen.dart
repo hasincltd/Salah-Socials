@@ -69,8 +69,8 @@ class _MixedEntry {
 
 // ── Mock data ─────────────────────────────────────────────────────────────
 
-const _gold   = Color(0xFFD4A847);
-const _teal   = Color(0xFF2DD4A0);
+const _gold   = AppTheme.primary;
+const _teal   = AppTheme.accent;
 const _purple = Color(0xFF9B59F5);
 const _orange = Color(0xFFFF8C42);
 const _pink   = Color(0xFFEC4899);
@@ -296,7 +296,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: const Color(0xFF1A2440), width: 1),
+                  border: Border.all(color: AppTheme.card, width: 1),
                 ),
                 child: Column(
                   children: [
@@ -352,7 +352,7 @@ class _Header extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: AppTheme.background,
-        border: Border(bottom: BorderSide(color: Color(0xFF1A2440), width: 1)),
+        border: Border(bottom: BorderSide(color: AppTheme.card, width: 1)),
       ),
       child: SafeArea(
         bottom: false,
