@@ -7,9 +7,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/profile_avatar.dart';
+import '../../widgets/ss_coins_widget.dart';
 import '../settings/settings_screen.dart';
 import '../notifications/notifications_screen.dart';
 
@@ -82,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   bool _loading = true;
   bool _hasError = false;
+  bool _initialSyncDone = false;
 
   String _displayName = 'Hasin';
   Map<String, bool> _prayerLogs = {};
@@ -246,6 +250,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   String _prefKey(String dateKey, String name) => 'prayer_log_${dateKey}_$name';
 
   Future<void> _loadPrayerLogs() async {
+    // On first load, pull streak data from Firestore into SharedPreferences
+    // so a reinstall or new device restores the user's balance.
+    if (!_initialSyncDone) {
+      _initialSyncDone = true;
+      final userId = FirebaseAuth.instance.currentUser?.uid;
+      if (userId != null) {
+        final streakData =
+            await FirestoreService.instance.getStreak(userId);
+        final remoteCoins = streakData['ssCoinsBalance'] ?? 0;
+        if (remoteCoins > 0) ssCoinBalance.value = remoteCoins;
+      }
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final dk = _todayKey();
     final logs = {for (final n in _names) n: prefs.getBool(_prefKey(dk, n)) ?? false};
@@ -283,11 +300,47 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return streak;
   }
 
+  int _computeTotalScore(SharedPreferences prefs) {
+    final dates = <String>{};
+    for (final k in prefs.getKeys()) {
+      if (k.startsWith('prayer_log_')) {
+        final parts = k.split('_');
+        if (parts.length == 4) dates.add(parts[2]);
+      }
+    }
+    int total = 0;
+    for (final dk in dates) {
+      if (_names.every((n) => prefs.getBool(_prefKey(dk, n)) == true)) total++;
+    }
+    return total;
+  }
+
   Future<void> _togglePrayer(String name) async {
     final prefs = await SharedPreferences.getInstance();
     final key = _prefKey(_todayKey(), name);
-    await prefs.setBool(key, !(prefs.getBool(key) ?? false));
+    final isLogged = !(prefs.getBool(key) ?? false);
+    await prefs.setBool(key, isLogged);
+
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId != null) {
+      await FirestoreService.instance.savePrayerLog(
+          userId, _todayKey(), name, isLogged);
+    }
+
     await _loadPrayerLogs();
+
+    if (userId != null) {
+      final updatedPrefs = await SharedPreferences.getInstance();
+      final total  = _computeTotalScore(updatedPrefs);
+      final coins  = total * 5;
+      ssCoinBalance.value = coins;
+      await FirestoreService.instance.updateStreak(
+        userId,
+        activeCount: _streakDays,
+        totalScore:  total,
+        ssCoins:     coins,
+      );
+    }
   }
 
   // ── Prayer list date navigation ───────────────────────────────────────────

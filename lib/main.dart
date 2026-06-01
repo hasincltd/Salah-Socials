@@ -8,6 +8,7 @@ import 'navigation/main_navigation.dart';
 import 'screens/notifications/notifications_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'theme/app_theme.dart';
+import 'services/firestore_service.dart';
 import 'services/traveler_alert_service.dart';
 import 'widgets/ss_coins_widget.dart';
 
@@ -59,13 +60,23 @@ class _AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<_AuthGate> {
-  // null = still loading, false/true = loaded
   bool? _onboardingComplete;
+  String? _lastSyncedUserId;
 
   @override
   void initState() {
     super.initState();
     _loadOnboardingState();
+    if (_firebaseReady) {
+      FirebaseAuth.instance.authStateChanges().listen((user) {
+        if (user != null && user.uid != _lastSyncedUserId) {
+          _lastSyncedUserId = user.uid;
+          FirestoreService.instance.syncOnLogin(user.uid);
+        } else if (user == null) {
+          _lastSyncedUserId = null;
+        }
+      });
+    }
   }
 
   Future<void> _loadOnboardingState() async {
