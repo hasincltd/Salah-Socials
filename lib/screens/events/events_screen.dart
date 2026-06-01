@@ -408,54 +408,92 @@ class _EventsScreenState extends State<EventsScreen> {
     final events = _filtered;
     return Scaffold(
       backgroundColor: AppTheme.background,
-      // TODO: RE-ENABLE LOCK OVERLAY BEFORE MVP RELEASE
-      body: Column(
+      body: Stack(
         children: [
-          _Header(
-            radii: _radii,
-            selected: _radiusMi,
-            onSelect: (r) => setState(() => _radiusMi = r),
-            anchoredToGps: _anchoredToGps,
-            showAddressInput: _showAddressInput,
-            geocoding: _geocoding,
-            addressCtrl: _addressCtrl,
-            anchorLabel: _anchorLabel,
-            onSwitchToGps: _switchToCurrentLocation,
-            onSwitchToAddress: () =>
-                setState(() => _showAddressInput = true),
-            onAddressSubmit: _geocodeAddress,
-            onMyEvents: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) =>
-                    _MyEventsScreen(myEventIds: Set.of(_myEventIds)),
-              ),
+          Opacity(
+            opacity: 0.25,
+            child: Column(
+              children: [
+                _Header(
+                  radii: _radii,
+                  selected: _radiusMi,
+                  onSelect: (r) => setState(() => _radiusMi = r),
+                  anchoredToGps: _anchoredToGps,
+                  showAddressInput: _showAddressInput,
+                  geocoding: _geocoding,
+                  addressCtrl: _addressCtrl,
+                  anchorLabel: _anchorLabel,
+                  onSwitchToGps: _switchToCurrentLocation,
+                  onSwitchToAddress: () =>
+                      setState(() => _showAddressInput = true),
+                  onAddressSubmit: _geocodeAddress,
+                  onMyEvents: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          _MyEventsScreen(myEventIds: Set.of(_myEventIds)),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: events.isEmpty
+                      ? _EmptyState(
+                          onExpand: () =>
+                              setState(() => _radiusMi = _radii.last),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                          itemCount: events.length,
+                          itemBuilder: (context, i) {
+                            final e = events[i];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _EventCard(
+                                event: e,
+                                joined: _myEventIds.contains(e.id),
+                                attendeeCount: _count(e),
+                                distLabel: _distLabel(e.distanceMi),
+                                dateLabel: _formatEventDate(e.dateTime),
+                                onJoin: () => _joinEvent(e),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
           ),
-          Expanded(
-            child: events.isEmpty
-                ? _EmptyState(
-                    onExpand: () =>
-                        setState(() => _radiusMi = _radii.last),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                    itemCount: events.length,
-                    itemBuilder: (context, i) {
-                      final e = events[i];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _EventCard(
-                          event: e,
-                          joined: _myEventIds.contains(e.id),
-                          attendeeCount: _count(e),
-                          distLabel: _distLabel(e.distanceMi),
-                          dateLabel: _formatEventDate(e.dateTime),
-                          onJoin: () => _joinEvent(e),
-                        ),
-                      );
-                    },
+          IgnorePointer(
+            child: Container(
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.lock_rounded,
+                    size: 100,
+                    color: Colors.white,
                   ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Coming Soon',
+                    style: GoogleFonts.outfit(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Events Launching Soon',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      color: AppTheme.textSubtle,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
