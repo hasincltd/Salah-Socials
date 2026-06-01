@@ -5,9 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/profile_avatar.dart';
+import '../../widgets/ss_coins_widget.dart';
 import '../settings/settings_screen.dart';
 import '../notifications/notifications_screen.dart';
-import '../../widgets/ss_coins_widget.dart';
 
 part 'widgets/profile_banner.dart';
 part 'widgets/profile_stats_row.dart';
@@ -152,18 +153,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Positioned(
                     bottom: 0, left: 16,
                     child: Container(
-                      width: avatarR * 2,
-                      height: avatarR * 2,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(color: AppTheme.background, width: 3),
                       ),
-                      child: ClipOval(
-                        child: CustomPaint(
-                          painter: _ProfileAvatarPainter(),
-                          size: Size(avatarR * 2, avatarR * 2),
-                        ),
-                      ),
+                      child: ProfileAvatar(size: avatarR * 2),
                     ),
                   ),
                   Positioned(

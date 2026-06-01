@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/profile_avatar.dart';
 import '../settings/settings_screen.dart';
 import '../notifications/notifications_screen.dart';
 
@@ -82,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _loading = true;
   bool _hasError = false;
 
+  String _displayName = 'Hasin';
   Map<String, bool> _prayerLogs = {};
   int _streakDays = 0;
   int _revivedStreak = 0;
@@ -252,6 +254,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     if (!mounted) return;
     setState(() {
+      _displayName = prefs.getString('settings_display_name') ?? 'Hasin';
       _prayerLogs = logs;
       _streakDays = _computeStreak(prefs);
       _weekViewLabels = labels;
@@ -702,7 +705,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, kToolbarHeight, 20, 32),
       children: [
-        _GreetingRow(greeting: _greeting),
+        _GreetingRow(greeting: _greeting, displayName: _displayName),
         const SizedBox(height: 22),
         if (_isViewingToday) ...[
           if (next != null) ...[
