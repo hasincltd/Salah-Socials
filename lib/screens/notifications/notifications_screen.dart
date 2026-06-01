@@ -1,6 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 
 part 'widgets/notif_rows.dart';
@@ -262,6 +264,51 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       _notifs.removeWhere((n) => dismissedIds.contains(n.id));
       _frStates = frStates;
     });
+    await _loadLiveRequests();
+  }
+
+  Color _colorForId(String id) {
+    const palette = [
+      Color(0xFF4F46E5), Color(0xFF059669), Color(0xFF9B59F5),
+      Color(0xFFFF8C42), Color(0xFFEC4899),
+    ];
+    return palette[id.hashCode.abs() % palette.length];
+  }
+
+  Future<void> _loadLiveRequests() async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+    final requests =
+        await FirestoreService.instance.getIncomingFriendRequests(userId);
+    if (!mounted || requests.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final liveNotifs = requests.map((r) {
+      final rid = r['requesterId'] as String;
+      return _Notif(
+        id: 'live_$rid',
+        section: _NSection.friendRequests,
+        title: r['displayName'] as String,
+        body: 'wants to be your friend',
+        timestamp: 'Just now',
+        isFriendRequest: true,
+        avatarColor: _colorForId(rid),
+      );
+    }).toList();
+    final newFrStates = <String, _FRState>{};
+    for (final n in liveNotifs) {
+      final raw = prefs.getString('$_kFrStateKey${n.id}');
+      newFrStates[n.id] = switch (raw) {
+        'accepted' => _FRState.accepted,
+        'declined' => _FRState.declined,
+        _ => _FRState.pending,
+      };
+    }
+    setState(() {
+      _notifs.removeWhere((n) => n.id.startsWith('live_'));
+      _notifs.insertAll(0, liveNotifs);
+      _frStates.addAll(newFrStates);
+    });
   }
 
   Future<void> _markRead(String id) async {
@@ -285,6 +332,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('$_kFrStateKey$id', state.name);
     setState(() => _frStates[id] = state);
+    if (id.startsWith('live_')) {
+      final requesterId = id.substring(5);
+      final userId = FirebaseAuth.instance.currentUser?.uid;
+      if (userId != null) {
+        if (state == _FRState.accepted) {
+          await FirestoreService.instance.acceptFriendRequest(userId, requesterId);
+        } else if (state == _FRState.declined) {
+          await FirestoreService.instance.declineFriendRequest(userId, requesterId);
+        }
+      }
+    }
     await _markRead(id);
   }
 

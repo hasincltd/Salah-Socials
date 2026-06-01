@@ -1,7 +1,11 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/profile_avatar.dart';
 import '../notifications/notifications_screen.dart';
@@ -232,19 +236,77 @@ class _CommunityScreenState extends State<CommunityScreen> {
   final Set<String> _sentRequests = {};
   int _myStreak = 0;
   int _myTotalScore = 0;
+  String _myDisplayName = 'You';
+
+  // Real Firestore friends
+  List<_Friend> _realFriends = [];
+  bool _friendsLoaded = false;
+  int _friendCount = 0;
+  StreamSubscription<int>? _friendCountSub;
 
   @override
   void initState() {
     super.initState();
-    _loadMyStats();
+    _loadMyStats().then((_) => _loadRealFriends());
+    _subscribeToFriendCount();
+  }
+
+  @override
+  void dispose() {
+    _friendCountSub?.cancel();
+    super.dispose();
+  }
+
+  // Derive a consistent avatar colour from any string ID.
+  Color _colorForId(String id) {
+    const palette = [_teal, _purple, _orange, _pink, _blue];
+    return palette[id.hashCode.abs() % palette.length];
   }
 
   Future<void> _loadMyStats() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
+      _myDisplayName = prefs.getString('settings_display_name') ?? 'You';
       _myStreak     = _computeStreak(prefs);
       _myTotalScore = _computeTotalScore(prefs);
+    });
+  }
+
+  Future<void> _loadRealFriends() async {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+
+    final data =
+        await FirestoreService.instance.loadFriendsWithProfiles(userId);
+    if (!mounted) return;
+
+    setState(() {
+      _realFriends = data.map((f) {
+        final fid = f['friendId'] as String;
+        return _Friend(
+          id: fid,
+          name: f['displayName'] as String,
+          avatarColor: _colorForId(fid),
+          activePrayers:  List.generate(5, (_) => _PrayerState.pending),
+          allTimePrayers: List.generate(5, (_) => _PrayerState.pending),
+          mosquePrayers:  List.generate(5, (_) => _PrayerState.pending),
+          activeStreak: f['activeStreak'] as int,
+          totalScore:   f['totalScore'] as int,
+        );
+      }).toList();
+      _friendsLoaded = true;
+      _friendCount = data.length;
+    });
+  }
+
+  void _subscribeToFriendCount() {
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    if (userId == null) return;
+    _friendCountSub = FirestoreService.instance
+        .streamFriendCount(userId)
+        .listen((count) {
+      if (mounted) setState(() => _friendCount = count);
     });
   }
 
@@ -288,50 +350,90 @@ class _CommunityScreenState extends State<CommunityScreen> {
     return total;
   }
 
-  // Real data for Hasin, mock for all other friends.
+  // Fallback helpers used only in demo mode (user not logged in).
   int _activeStreak(_Friend f) => f.id == 'hasin' ? _myStreak     : f.activeStreak;
   int _totalScore(_Friend f)   => f.id == 'hasin' ? _myTotalScore : f.totalScore;
 
   // Build the ranked leaderboard entries for the active tab.
   List<_MixedEntry> get _ranked {
     final List<_MixedEntry> entries;
+    final pendingPrayers = List.generate(5, (_) => _PrayerState.pending);
 
-    switch (_tab) {
-      case _Tab.active:
-        entries = _friends.map((f) => _MixedEntry(
-          id: f.id, name: f.name, avatarColor: f.avatarColor,
-          streak: _activeStreak(f), isFriend: true, prayers: f.activePrayers,
-        )).toList();
-
-      case _Tab.allTime:
-        entries = _friends.map((f) => _MixedEntry(
-          id: f.id, name: f.name, avatarColor: f.avatarColor,
-          streak: _totalScore(f), isFriend: true, prayers: f.allTimePrayers,
-        )).toList();
-
-      case _Tab.myMosque:
-        entries = [
-          ..._friends.map((f) => _MixedEntry(
-            id: f.id, name: f.name, avatarColor: f.avatarColor,
-            streak: _activeStreak(f), isFriend: true, prayers: f.mosquePrayers,
-          )),
-          ..._mosqueFriends.map((nf) => _MixedEntry(
-            id: nf.id, name: nf.name, avatarColor: nf.avatarColor,
-            streak: nf.activeStreak, isFriend: false,
-          )),
-        ];
-
-      case _Tab.top100:
-        entries = [
-          ..._friends.map((f) => _MixedEntry(
+    if (!_friendsLoaded) {
+      // Demo mode — use mock friends with real local stats for the hasin entry.
+      switch (_tab) {
+        case _Tab.active:
+          entries = _friends.map((f) => _MixedEntry(
             id: f.id, name: f.name, avatarColor: f.avatarColor,
             streak: _activeStreak(f), isFriend: true, prayers: f.activePrayers,
-          )),
-          ..._top100NonFriends.map((nf) => _MixedEntry(
-            id: nf.id, name: nf.name, avatarColor: nf.avatarColor,
-            streak: nf.activeStreak, isFriend: false,
-          )),
-        ];
+          )).toList();
+        case _Tab.allTime:
+          entries = _friends.map((f) => _MixedEntry(
+            id: f.id, name: f.name, avatarColor: f.avatarColor,
+            streak: _totalScore(f), isFriend: true, prayers: f.allTimePrayers,
+          )).toList();
+        case _Tab.myMosque:
+          entries = [
+            ..._friends.map((f) => _MixedEntry(
+              id: f.id, name: f.name, avatarColor: f.avatarColor,
+              streak: _activeStreak(f), isFriend: true, prayers: f.mosquePrayers,
+            )),
+            ..._mosqueFriends.map((nf) => _MixedEntry(
+              id: nf.id, name: nf.name, avatarColor: nf.avatarColor,
+              streak: nf.activeStreak, isFriend: false,
+            )),
+          ];
+        case _Tab.top100:
+          entries = [
+            ..._friends.map((f) => _MixedEntry(
+              id: f.id, name: f.name, avatarColor: f.avatarColor,
+              streak: _activeStreak(f), isFriend: true, prayers: f.activePrayers,
+            )),
+            ..._top100NonFriends.map((nf) => _MixedEntry(
+              id: nf.id, name: nf.name, avatarColor: nf.avatarColor,
+              streak: nf.activeStreak, isFriend: false,
+            )),
+          ];
+      }
+    } else {
+      // Live mode — current user entry + real Firestore friends.
+      final meEntry = _MixedEntry(
+        id: 'me',
+        name: '$_myDisplayName (You)',
+        avatarColor: _gold,
+        streak: _tab == _Tab.allTime ? _myTotalScore : _myStreak,
+        isFriend: true,
+        prayers: pendingPrayers,
+      );
+      final friendEntries = _realFriends.map((f) => _MixedEntry(
+        id: f.id, name: f.name, avatarColor: f.avatarColor,
+        streak: _tab == _Tab.allTime ? f.totalScore : f.activeStreak,
+        isFriend: true, prayers: pendingPrayers,
+      )).toList();
+
+      switch (_tab) {
+        case _Tab.active:
+        case _Tab.allTime:
+          entries = [meEntry, ...friendEntries];
+        case _Tab.myMosque:
+          entries = [
+            meEntry,
+            ...friendEntries,
+            ..._mosqueFriends.map((nf) => _MixedEntry(
+              id: nf.id, name: nf.name, avatarColor: nf.avatarColor,
+              streak: nf.activeStreak, isFriend: false,
+            )),
+          ];
+        case _Tab.top100:
+          entries = [
+            meEntry,
+            ...friendEntries,
+            ..._top100NonFriends.map((nf) => _MixedEntry(
+              id: nf.id, name: nf.name, avatarColor: nf.avatarColor,
+              streak: nf.activeStreak, isFriend: false,
+            )),
+          ];
+      }
     }
 
     entries.sort((a, b) => b.streak.compareTo(a.streak));
@@ -350,6 +452,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
             child: _Header(
               tab: _tab,
               onTabChanged: (t) => setState(() => _tab = t),
+              friendCount: _friendsLoaded ? _friendCount : _friends.length,
             ),
           ),
           // ── Leaderboard ───────────────────────────────────────────────
@@ -376,13 +479,18 @@ class _CommunityScreenState extends State<CommunityScreen> {
                               entry: ranked[i],
                               isLast: i == ranked.length - 1,
                               requestSent: _sentRequests.contains(ranked[i].id),
-                              onRequest: () => setState(() {
-                                    if (_sentRequests.contains(ranked[i].id)) {
-                                      _sentRequests.remove(ranked[i].id);
-                                    } else {
-                                      _sentRequests.add(ranked[i].id);
-                                    }
-                                  }),
+                              onRequest: () {
+                                final entryId = ranked[i].id;
+                                if (_sentRequests.contains(entryId)) {
+                                  setState(() => _sentRequests.remove(entryId));
+                                } else {
+                                  setState(() => _sentRequests.add(entryId));
+                                  final userId = FirebaseAuth.instance.currentUser?.uid;
+                                  if (userId != null) {
+                                    FirestoreService.instance.sendFriendRequest(userId, entryId);
+                                  }
+                                }
+                              },
                             ),
                   ],
                 ),
@@ -402,7 +510,9 @@ class _Header extends StatelessWidget {
   final _Tab tab;
   final ValueChanged<_Tab> onTabChanged;
 
-  const _Header({required this.tab, required this.onTabChanged});
+  final int friendCount;
+
+  const _Header({required this.tab, required this.onTabChanged, required this.friendCount});
 
   String get _subtitle => switch (tab) {
     _Tab.active   => "Your friends' active streaks",
@@ -469,7 +579,7 @@ class _Header extends StatelessWidget {
                             size: 14, color: AppTheme.primary),
                         const SizedBox(width: 5),
                         Text(
-                          '6 friends',
+                          '$friendCount ${friendCount == 1 ? 'friend' : 'friends'}',
                           style: GoogleFonts.outfit(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
