@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/profile_avatar.dart';
 import '../notifications/notifications_screen.dart';
 
 part 'widgets/leaderboard_tab.dart';
@@ -227,6 +230,67 @@ class CommunityScreen extends StatefulWidget {
 class _CommunityScreenState extends State<CommunityScreen> {
   _Tab _tab = _Tab.active;
   final Set<String> _sentRequests = {};
+  int _myStreak = 0;
+  int _myTotalScore = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMyStats();
+  }
+
+  Future<void> _loadMyStats() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _myStreak     = _computeStreak(prefs);
+      _myTotalScore = _computeTotalScore(prefs);
+    });
+  }
+
+  int _computeStreak(SharedPreferences prefs) {
+    const names = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+    String key(String dk, String n) => 'prayer_log_${dk}_$n';
+    var day = DateTime.now();
+    final todayDk = DateFormat('yyyy-MM-dd').format(day);
+    if (!names.every((n) => prefs.getBool(key(todayDk, n)) == true)) {
+      day = day.subtract(const Duration(days: 1));
+    }
+    int streak = 0;
+    for (int i = 0; i < 365; i++) {
+      final dk = DateFormat('yyyy-MM-dd').format(day);
+      if (names.every((n) => prefs.getBool(key(dk, n)) == true)) {
+        streak++;
+        day = day.subtract(const Duration(days: 1));
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  int _computeTotalScore(SharedPreferences prefs) {
+    const names = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+    final dates = <String>{};
+    for (final k in prefs.getKeys()) {
+      if (k.startsWith('prayer_log_')) {
+        final parts = k.split('_');
+        // key: prayer_log_YYYY-MM-DD_PrayerName → parts[2] = date
+        if (parts.length == 4) dates.add(parts[2]);
+      }
+    }
+    int total = 0;
+    for (final dk in dates) {
+      if (names.every((n) => prefs.getBool('prayer_log_${dk}_$n') == true)) {
+        total++;
+      }
+    }
+    return total;
+  }
+
+  // Real data for Hasin, mock for all other friends.
+  int _activeStreak(_Friend f) => f.id == 'hasin' ? _myStreak     : f.activeStreak;
+  int _totalScore(_Friend f)   => f.id == 'hasin' ? _myTotalScore : f.totalScore;
 
   // Build the ranked leaderboard entries for the active tab.
   List<_MixedEntry> get _ranked {
@@ -236,20 +300,20 @@ class _CommunityScreenState extends State<CommunityScreen> {
       case _Tab.active:
         entries = _friends.map((f) => _MixedEntry(
           id: f.id, name: f.name, avatarColor: f.avatarColor,
-          streak: f.activeStreak, isFriend: true, prayers: f.activePrayers,
+          streak: _activeStreak(f), isFriend: true, prayers: f.activePrayers,
         )).toList();
 
       case _Tab.allTime:
         entries = _friends.map((f) => _MixedEntry(
           id: f.id, name: f.name, avatarColor: f.avatarColor,
-          streak: f.totalScore, isFriend: true, prayers: f.allTimePrayers,
+          streak: _totalScore(f), isFriend: true, prayers: f.allTimePrayers,
         )).toList();
 
       case _Tab.myMosque:
         entries = [
           ..._friends.map((f) => _MixedEntry(
             id: f.id, name: f.name, avatarColor: f.avatarColor,
-            streak: f.activeStreak, isFriend: true, prayers: f.mosquePrayers,
+            streak: _activeStreak(f), isFriend: true, prayers: f.mosquePrayers,
           )),
           ..._mosqueFriends.map((nf) => _MixedEntry(
             id: nf.id, name: nf.name, avatarColor: nf.avatarColor,
@@ -261,7 +325,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
         entries = [
           ..._friends.map((f) => _MixedEntry(
             id: f.id, name: f.name, avatarColor: f.avatarColor,
-            streak: f.activeStreak, isFriend: true, prayers: f.activePrayers,
+            streak: _activeStreak(f), isFriend: true, prayers: f.activePrayers,
           )),
           ..._top100NonFriends.map((nf) => _MixedEntry(
             id: nf.id, name: nf.name, avatarColor: nf.avatarColor,

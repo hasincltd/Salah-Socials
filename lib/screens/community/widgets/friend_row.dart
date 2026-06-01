@@ -43,7 +43,9 @@ class _FriendRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           // Avatar
-          _Avatar(name: entry.name, color: entry.avatarColor, size: 36),
+          entry.id == 'hasin'
+              ? ProfileAvatar(size: 36)
+              : _Avatar(name: entry.name, color: entry.avatarColor, size: 36),
           const SizedBox(width: 10),
           // Name + prayer pips
           Expanded(
