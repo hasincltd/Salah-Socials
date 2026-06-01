@@ -7,12 +7,18 @@ class _PrayerListCard extends StatelessWidget {
   final AnimationController pulseAnim;
   final Map<String, bool> prayerLogs;
   final void Function(String) onToggle;
+  final bool isToday;
+  final bool isPremiumRetroactive;
+  final bool isFuture;
 
   const _PrayerListCard({
     required this.prayers,
     required this.pulseAnim,
     required this.prayerLogs,
     required this.onToggle,
+    this.isToday = true,
+    this.isPremiumRetroactive = false,
+    this.isFuture = false,
   });
 
   @override
@@ -26,17 +32,25 @@ class _PrayerListCard extends StatelessWidget {
       ),
       child: Column(
         children: List.generate(prayers.length, (i) {
-          // Window is open when the prayer has started AND the next prayer
-          // hasn't started yet (Isha has no upper bound within the same day).
-          final windowOpen = !prayers[i].time.isAfter(now) &&
+          // Window is open only on today when the prayer has started AND
+          // the next prayer hasn't started yet.
+          final windowOpen = isToday &&
+              !prayers[i].time.isAfter(now) &&
               (i == prayers.length - 1 || prayers[i + 1].time.isAfter(now));
+          final isCompleted = isToday
+              ? (!prayers[i].time.isAfter(now) && !windowOpen)
+              : isFuture
+                  ? false
+                  : true;
           return _PrayerRow(
             prayer: prayers[i],
             isCurrent: windowOpen,
-            isCompleted: !prayers[i].time.isAfter(now) && !windowOpen,
+            isCompleted: isCompleted,
             isLogged: prayerLogs[prayers[i].name] ?? false,
             isLast: i == prayers.length - 1,
-            onTap: windowOpen ? () => onToggle(prayers[i].name) : null,
+            onTap: (windowOpen || isPremiumRetroactive)
+                ? () => onToggle(prayers[i].name)
+                : null,
             pulseAnim: pulseAnim,
           );
         }),

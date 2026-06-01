@@ -4,19 +4,19 @@ part of '../home_screen.dart';
 
 class _StreakChip extends StatelessWidget {
   final int streakDays;
-  final int todayWeekday; // Dart: 1=Mon, 7=Sun
-  final Map<int, bool> weekLogs; // weekday 1–7 → all 5 prayers logged
+  final List<String> dayLabels; // 7 items — letters (current week) or day numbers (past weeks)
+  final List<bool> dayDone;     // 7 items — whether all 5 prayers logged that day
+  final int? todayIndex;        // 0–6, null when today is not in the viewed week
 
   const _StreakChip({
     required this.streakDays,
-    required this.todayWeekday,
-    required this.weekLogs,
+    required this.dayLabels,
+    required this.dayDone,
+    this.todayIndex,
   });
 
   @override
   Widget build(BuildContext context) {
-    const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
       decoration: BoxDecoration(
@@ -58,9 +58,8 @@ class _StreakChip extends StatelessWidget {
                 if (i > 0) const SizedBox(width: 10),
                 _DayDot(
                   label: dayLabels[i],
-                  dayNum: i + 1,
-                  todayWeekday: todayWeekday,
-                  isDone: weekLogs[i + 1] ?? false,
+                  isToday: todayIndex == i,
+                  isDone: dayDone[i],
                 ),
               ],
             ],
@@ -73,21 +72,17 @@ class _StreakChip extends StatelessWidget {
 
 class _DayDot extends StatelessWidget {
   final String label;
-  final int dayNum;
-  final int todayWeekday;
-  final bool isDone; // true only when all 5 prayers were logged that day
+  final bool isToday;
+  final bool isDone;
 
   const _DayDot({
     required this.label,
-    required this.dayNum,
-    required this.todayWeekday,
+    required this.isToday,
     required this.isDone,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isToday = dayNum == todayWeekday;
-
     return Column(
       children: [
         Text(

@@ -83,12 +83,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _hasError = false;
 
   Map<String, bool> _prayerLogs = {};
-  Map<int, bool> _weekLogs = {};  // weekday 1–7 → all 5 prayers logged that day
   int _streakDays = 0;
   int _revivedStreak = 0;
   int _prevStreakCount = 0;
   int _ssCoins = 0;
   bool _revivePopupShownThisSession = false;
+
+  // Prayer list date navigation
+  DateTime? _viewDate; // null = today
+  final bool _isPremium = false;
+  Map<String, bool> _viewLogs = {};
+  List<_Prayer> _viewPrayers = []; // fetched times for future days
+  bool _viewLoading = false;
+  double? _cachedLat;
+  double? _cachedLon;
+
+  // Streak chip week navigation
+  int _weekOffset = 0; // 0 = current week, positive = weeks back
+  List<String> _weekViewLabels = const ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  List<bool> _weekViewDone = const [false, false, false, false, false, false, false];
+  int? _weekViewTodayIndex;
 
   static const _kReviveLostAtMs      = 'streak_revive_lost_at_ms';
   static const _kRevivePrevCount     = 'streak_revive_prev_count';
@@ -144,6 +158,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ── Data ─────────────────────────────────────────────────────────────────
 
+  Future<List<_Prayer>> _fetchPrayerTimings(
+      DateTime date, double lat, double lon) async {
+    final noon = DateTime(date.year, date.month, date.day, 12);
+    final ts = noon.millisecondsSinceEpoch ~/ 1000;
+    final uri = Uri.parse(
+      'https://api.aladhan.com/v1/timings/$ts'
+      '?latitude=$lat&longitude=$lon&method=3',
+    );
+    final res = await http.get(uri).timeout(const Duration(seconds: 10));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    final timings =
+        jsonDecode(res.body)['data']['timings'] as Map<String, dynamic>;
+    return [
+      for (var i = 0; i < _names.length; i++)
+        _Prayer(_names[i], _parseTime(timings[_names[i]] as String, date), _dots[i]),
+    ];
+  }
+
   Future<void> _loadPrayers() async {
     if (mounted) setState(() { _loading = true; _hasError = false; });
     try {
@@ -164,26 +196,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       } catch (_) {}
 
-      final now = DateTime.now();
-      final ts = now.millisecondsSinceEpoch ~/ 1000;
-      final uri = Uri.parse(
-        'https://api.aladhan.com/v1/timings/$ts'
-        '?latitude=$lat&longitude=$lon&method=3',
-      );
-      final res = await http.get(uri).timeout(const Duration(seconds: 10));
-      if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+      _cachedLat = lat;
+      _cachedLon = lon;
 
-      final timings =
-          jsonDecode(res.body)['data']['timings'] as Map<String, dynamic>;
-      _prayers = [
-        for (var i = 0; i < _names.length; i++)
-          _Prayer(
-            _names[i],
-            _parseTime(timings[_names[i]] as String, now),
-            _dots[i],
-          ),
-      ];
-
+      _prayers = await _fetchPrayerTimings(DateTime.now(), lat, lon);
       _recompute();
       _startTick();
       if (mounted) setState(() => _loading = false);
@@ -232,20 +248,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final dk = _todayKey();
     final logs = {for (final n in _names) n: prefs.getBool(_prefKey(dk, n)) ?? false};
 
-    final now = DateTime.now();
-    final monday = now.subtract(Duration(days: now.weekday - 1));
-    final weekLogs = <int, bool>{};
-    for (int i = 1; i <= 7; i++) {
-      final dayDate = monday.add(Duration(days: i - 1));
-      final dayDk = DateFormat('yyyy-MM-dd').format(dayDate);
-      weekLogs[i] = _names.every((n) => prefs.getBool(_prefKey(dayDk, n)) == true);
-    }
+    final (labels, done, todayIdx) = _buildWeekView(_weekOffset, prefs);
 
     if (!mounted) return;
     setState(() {
       _prayerLogs = logs;
-      _weekLogs = weekLogs;
       _streakDays = _computeStreak(prefs);
+      _weekViewLabels = labels;
+      _weekViewDone = done;
+      _weekViewTodayIndex = todayIdx;
     });
     await _checkStreakRevive(prefs);
   }
@@ -274,6 +285,143 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final key = _prefKey(_todayKey(), name);
     await prefs.setBool(key, !(prefs.getBool(key) ?? false));
     await _loadPrayerLogs();
+  }
+
+  // ── Prayer list date navigation ───────────────────────────────────────────
+
+  int get _daysFromToday {
+    if (_viewDate == null) return 0;
+    final today = DateTime.now();
+    final todayNorm = DateTime(today.year, today.month, today.day);
+    final viewNorm =
+        DateTime(_viewDate!.year, _viewDate!.month, _viewDate!.day);
+    return viewNorm.difference(todayNorm).inDays;
+  }
+
+  bool get _isViewingToday => _daysFromToday == 0;
+  bool get _isViewingFuture => _daysFromToday > 0;
+
+  int get _maxHistoryDays => _isPremium ? 30 : 7;
+
+  bool get _canGoPrev => _daysFromToday > -(_maxHistoryDays - 1);
+  bool get _canGoNext => _daysFromToday < 7;
+
+  Future<void> _goToPrevDay() async {
+    if (!_canGoPrev) return;
+    final base = _viewDate ?? DateTime.now();
+    final prev = base.subtract(const Duration(days: 1));
+    await _navigateToDate(DateTime(prev.year, prev.month, prev.day));
+  }
+
+  Future<void> _goToNextDay() async {
+    if (!_canGoNext) return;
+    final base = _viewDate ?? DateTime.now();
+    final next = base.add(const Duration(days: 1));
+    await _navigateToDate(DateTime(next.year, next.month, next.day));
+  }
+
+  Future<void> _navigateToDate(DateTime date) async {
+    final today = DateTime.now();
+    final todayNorm = DateTime(today.year, today.month, today.day);
+    final dateNorm = DateTime(date.year, date.month, date.day);
+
+    if (dateNorm.isAtSameMomentAs(todayNorm)) {
+      setState(() {
+        _viewDate = null;
+        _viewLogs = {};
+        _viewPrayers = [];
+      });
+      return;
+    }
+
+    if (dateNorm.isAfter(todayNorm)) {
+      // Future day — fetch prayer times from API
+      setState(() {
+        _viewDate = date;
+        _viewLoading = true;
+        _viewPrayers = [];
+        _viewLogs = {};
+      });
+      await _loadFuturePrayers(date);
+      return;
+    }
+
+    // Past day — read logs from SharedPreferences; use today's prayer times
+    final prefs = await SharedPreferences.getInstance();
+    final dk = DateFormat('yyyy-MM-dd').format(date);
+    final logs = {
+      for (final n in _names) n: prefs.getBool(_prefKey(dk, n)) ?? false
+    };
+    if (!mounted) return;
+    setState(() {
+      _viewDate = date;
+      _viewLogs = logs;
+      _viewPrayers = [];
+    });
+  }
+
+  Future<void> _loadFuturePrayers(DateTime date) async {
+    try {
+      final prayers = await _fetchPrayerTimings(
+        date, _cachedLat ?? _fallbackLat, _cachedLon ?? _fallbackLon);
+      if (!mounted) return;
+      setState(() { _viewPrayers = prayers; _viewLoading = false; });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _viewLoading = false);
+    }
+  }
+
+  Future<void> _toggleViewPrayer(String name) async {
+    if (_viewDate == null || !_isPremium) return;
+    final prefs = await SharedPreferences.getInstance();
+    final dk = DateFormat('yyyy-MM-dd').format(_viewDate!);
+    final key = _prefKey(dk, name);
+    await prefs.setBool(key, !(prefs.getBool(key) ?? false));
+    if (!mounted) return;
+    final updatedLogs = {
+      for (final n in _names) n: prefs.getBool(_prefKey(dk, n)) ?? false
+    };
+    setState(() => _viewLogs = updatedLogs);
+  }
+
+  // ── Streak chip week navigation ───────────────────────────────────────────
+
+  int get _maxWeekOffset => _isPremium ? 5 : 2;
+
+  (List<String>, List<bool>, int?) _buildWeekView(
+      int offset, SharedPreferences prefs) {
+    final now = DateTime.now();
+    final monday =
+        now.subtract(Duration(days: now.weekday - 1 + offset * 7));
+    final todayNorm = DateTime(now.year, now.month, now.day);
+    const letters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    final labels = <String>[];
+    final done = <bool>[];
+    int? todayIdx;
+    for (int i = 0; i < 7; i++) {
+      final day = monday.add(Duration(days: i));
+      labels.add(offset == 0 ? letters[i] : '${day.day}');
+      final dk = DateFormat('yyyy-MM-dd').format(day);
+      done.add(_names.every((n) => prefs.getBool(_prefKey(dk, n)) == true));
+      final dayNorm = DateTime(day.year, day.month, day.day);
+      if (dayNorm == todayNorm) todayIdx = i;
+    }
+    return (labels, done, todayIdx);
+  }
+
+  Future<void> _changeWeekOffset(int delta) async {
+    final newOffset = _weekOffset + delta;
+    if (newOffset < 0 || newOffset > _maxWeekOffset) return;
+    final prefs = await SharedPreferences.getInstance();
+    final (labels, done, todayIdx) = _buildWeekView(newOffset, prefs);
+    if (!mounted) return;
+    setState(() {
+      _weekOffset = newOffset;
+      _weekViewLabels = labels;
+      _weekViewDone = done;
+      _weekViewTodayIndex = todayIdx;
+    });
   }
 
   // ── Streak revive ─────────────────────────────────────────────────────────
@@ -410,10 +558,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final h = _toHijri(now);
+    final displayDate = _viewDate ?? DateTime.now();
+    final h = _toHijri(displayDate);
     final hijriStr = '${h.day} ${_hijriMonths[h.month - 1]} ${h.year} AH';
-    final gregStr = DateFormat('EEEE, d MMMM yyyy').format(now);
+    final gregStr = DateFormat('EEEE, d MMMM yyyy').format(displayDate);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -423,23 +571,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: true,
-        title: Column(
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              hijriStr,
-              style: GoogleFonts.outfit(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: AppTheme.primary,
-                letterSpacing: 0.3,
-              ),
+            _DateNavArrow(
+              icon: Icons.chevron_left_rounded,
+              enabled: _canGoPrev,
+              onTap: _goToPrevDay,
             ),
-            Text(
-              gregStr,
-              style: GoogleFonts.outfit(
-                fontSize: 10,
-                color: AppTheme.textSubtle,
-              ),
+            const SizedBox(width: 6),
+            Column(
+              children: [
+                Text(
+                  hijriStr,
+                  style: GoogleFonts.outfit(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.primary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                Text(
+                  gregStr,
+                  style: GoogleFonts.outfit(
+                    fontSize: 10,
+                    color: AppTheme.textSubtle,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 6),
+            _DateNavArrow(
+              icon: Icons.chevron_right_rounded,
+              enabled: _canGoNext,
+              onTap: _goToNextDay,
             ),
           ],
         ),
@@ -510,6 +675,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildBody() {
+    if (_viewLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppTheme.primary),
+      );
+    }
+
+    final prayers =
+        _isViewingFuture ? _viewPrayers : _prayers;
+    final prayerLogs = _isViewingToday ? _prayerLogs : _viewLogs;
+    final onToggle = _isViewingToday ? _togglePrayer : _toggleViewPrayer;
+
     final _Prayer? next;
     if (_nextIdx >= 0) {
       next = _prayers[_nextIdx];
@@ -522,33 +698,154 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     } else {
       next = null;
     }
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, kToolbarHeight, 20, 32),
       children: [
         _GreetingRow(greeting: _greeting),
         const SizedBox(height: 22),
-        if (next != null) ...[
-          _HeroPrayerCard(
-            prayer: next,
-            countdownStr: _countdownStr,
-            communityName: _communityPrayerName,
-            pulseAnim: _pulseAnim,
-          ),
+        if (_isViewingToday) ...[
+          if (next != null) ...[
+            _HeroPrayerCard(
+              prayer: next,
+              countdownStr: _countdownStr,
+              communityName: _communityPrayerName,
+              pulseAnim: _pulseAnim,
+            ),
+            const SizedBox(height: 18),
+          ],
+        ] else if (_isViewingFuture) ...[
+          _DayFutureMessage(viewDate: _viewDate!),
+          const SizedBox(height: 18),
+        ] else ...[
+          _DayCompletionMessage(viewLogs: _viewLogs),
           const SizedBox(height: 18),
         ],
-        _PrayerListCard(
-          prayers: _prayers,
-          pulseAnim: _pulseAnim,
-          prayerLogs: _prayerLogs,
-          onToggle: _togglePrayer,
+        GestureDetector(
+          onHorizontalDragEnd: (details) {
+            final v = details.primaryVelocity ?? 0;
+            if (v > 200) _goToPrevDay();
+            if (v < -200) _goToNextDay();
+          },
+          child: _PrayerListCard(
+            prayers: prayers,
+            pulseAnim: _pulseAnim,
+            prayerLogs: prayerLogs,
+            onToggle: onToggle,
+            isToday: _isViewingToday,
+            isPremiumRetroactive: !_isViewingFuture && _isPremium,
+            isFuture: _isViewingFuture,
+          ),
         ),
         const SizedBox(height: 18),
-        _StreakChip(
-          streakDays: math.max(_streakDays, _revivedStreak),
-          todayWeekday: DateTime.now().weekday,
-          weekLogs: _weekLogs,
+        GestureDetector(
+          onHorizontalDragEnd: (details) {
+            final v = details.primaryVelocity ?? 0;
+            if (v > 200) _changeWeekOffset(1);
+            if (v < -200) _changeWeekOffset(-1);
+          },
+          child: _StreakChip(
+            streakDays: math.max(_streakDays, _revivedStreak),
+            dayLabels: _weekViewLabels,
+            dayDone: _weekViewDone,
+            todayIndex: _weekViewTodayIndex,
+          ),
         ),
       ],
+    );
+  }
+}
+
+// ── Date navigation arrow ─────────────────────────────────────────────────
+
+class _DateNavArrow extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _DateNavArrow({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: enabled ? onTap : null,
+        child: Icon(
+          icon,
+          size: 24,
+          color: enabled
+              ? AppTheme.primary
+              : AppTheme.primary.withValues(alpha: 0.3),
+        ),
+      );
+}
+
+// ── Day completion message ────────────────────────────────────────────────
+
+class _DayCompletionMessage extends StatelessWidget {
+  final Map<String, bool> viewLogs;
+
+  const _DayCompletionMessage({required this.viewLogs});
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = viewLogs.values.where((v) => v).length;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF1F2D4A)),
+      ),
+      child: Center(
+        child: Text(
+          completed == 5
+              ? '🎉 Congratulations — all 5 prayers completed!'
+              : '✨ $completed/5 prayers completed — keep going!',
+          style: GoogleFonts.outfit(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: AppTheme.primary,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Future day header message ─────────────────────────────────────────────
+
+class _DayFutureMessage extends StatelessWidget {
+  final DateTime viewDate;
+
+  const _DayFutureMessage({required this.viewDate});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = DateFormat('EEEE, d MMMM').format(viewDate);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF1F2D4A)),
+      ),
+      child: Center(
+        child: Text(
+          '📅 Prayer times for $label',
+          style: GoogleFonts.outfit(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: AppTheme.primary,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ),
     );
   }
 }
