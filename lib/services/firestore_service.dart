@@ -258,6 +258,31 @@ class FirestoreService {
     }
   }
 
+  // ── User profile updates ─────────────────────────────────────────────────
+
+  /// Saves homeLocation (postcode) to SharedPreferences and Firestore.
+  Future<void> updateUserLocation(String userId, {String? postcode}) async {
+    if (postcode == null || postcode.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('home_postcode', postcode);
+    try {
+      await _db.collection('users').doc(userId).update({
+        'homeLocation': postcode,
+      });
+    } catch (_) {}
+  }
+
+  /// Saves homeMosqueId to SharedPreferences and Firestore.
+  Future<void> updateUserMosque(String userId, String mosqueId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('home_mosque_id', mosqueId);
+    try {
+      await _db.collection('users').doc(userId).update({
+        'homeMosqueId': mosqueId,
+      });
+    } catch (_) {}
+  }
+
   // ── Sync on login ─────────────────────────────────────────────────────────
 
   /// Called once per login session to pull remote data into SharedPreferences.

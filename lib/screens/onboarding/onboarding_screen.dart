@@ -1,7 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../navigation/main_navigation.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 import 's1_welcome.dart';
 import 's2_auth.dart';
@@ -26,6 +28,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   // Signals Screen 2 to open in sign-in mode when user taps "I have an account"
   final _signInModeNotifier = ValueNotifier<bool>(false);
+
+  // Auth state
+  String? _userId;
+  bool _isNewUser = false;
 
   // Collected data
   String _username = '';
@@ -57,6 +63,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   // Called by Screen 2 after successful auth
   void _onAuthSuccess(bool isNewUser) {
+    _isNewUser = isNewUser;
+    _userId = FirebaseAuth.instance.currentUser?.uid;
+
+    if (isNewUser && _userId != null) {
+      // Create the Firestore user document immediately with email.
+      // Username and displayName will be filled in on Screen 3.
+      final email = FirebaseAuth.instance.currentUser?.email ?? '';
+      FirestoreService.instance.createUserProfile(
+        _userId!,
+        username: '',
+        displayName: '',
+        email: email,
+      );
+    }
+
     if (!isNewUser) {
       // Returning user — skip profile setup and go straight to app
       _completeOnboarding(skipWelcome: false);
@@ -69,6 +90,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void _onProfileNext(String username, String displayName) {
     _username = username;
     _displayName = displayName;
+    if (_userId != null) {
+      final email = FirebaseAuth.instance.currentUser?.email ?? '';
+      FirestoreService.instance.createUserProfile(
+        _userId!,
+        username: username,
+        displayName: displayName,
+        email: email,
+      );
+    }
     _next();
   }
 
@@ -76,10 +106,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _latitude = latitude;
     _longitude = longitude;
     _postcode = postcode;
+    if (_userId != null) {
+      FirestoreService.instance.updateUserLocation(_userId!, postcode: postcode);
+    }
     _next();
   }
 
   void _onMosqueNext(String? mosqueName) {
+    if (_userId != null && mosqueName != null) {
+      FirestoreService.instance.updateUserMosque(_userId!, mosqueName);
+    }
     _next();
   }
 
@@ -101,6 +137,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       await prefs.setDouble('home_longitude', _longitude!);
     }
     await prefs.setBool('onboarding_complete', true);
+
+    if (_userId != null && _isNewUser) {
+      await FirestoreService.instance.updateStreak(
+        _userId!,
+        activeCount: 0,
+        totalScore: 0,
+        ssCoins: 0,
+      );
+    }
 
     if (!mounted) return;
 
