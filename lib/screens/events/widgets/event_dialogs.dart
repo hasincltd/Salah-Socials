@@ -21,6 +21,11 @@ class _JoinRegistrationDialog extends StatefulWidget {
 class _JoinRegistrationDialogState extends State<_JoinRegistrationDialog> {
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
+  String? _nameError;
+  String? _emailError;
+
+  bool get _canConfirm =>
+      _nameCtrl.text.trim().isNotEmpty && _emailCtrl.text.trim().isNotEmpty;
 
   @override
   void initState() {
@@ -30,11 +35,36 @@ class _JoinRegistrationDialogState extends State<_JoinRegistrationDialog> {
 
   Future<void> _prefill() async {
     final prefs = await SharedPreferences.getInstance();
-    if (!mounted) { return; }
+    final authEmail = FirebaseAuth.instance.currentUser?.email ?? '';
+    if (!mounted) return;
     setState(() {
-      _nameCtrl.text = prefs.getString(widget.nameKey) ?? '';
-      _emailCtrl.text = prefs.getString(widget.emailKey) ?? '';
+      _nameCtrl.text = prefs.getString('settings_display_name') ??
+          prefs.getString(widget.nameKey) ??
+          '';
+      _emailCtrl.text =
+          authEmail.isNotEmpty ? authEmail : (prefs.getString(widget.emailKey) ?? '');
     });
+  }
+
+  void _onConfirm() {
+    final name = _nameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    String? nameErr;
+    String? emailErr;
+
+    if (name.isEmpty) nameErr = 'Name is required';
+    if (email.isEmpty) {
+      emailErr = 'Email is required';
+    } else if (!email.contains('@') || !email.contains('.')) {
+      emailErr = 'Please enter a valid email';
+    }
+
+    if (nameErr != null || emailErr != null) {
+      setState(() { _nameError = nameErr; _emailError = emailErr; });
+      return;
+    }
+
+    Navigator.pop(context, {'name': name, 'email': email});
   }
 
   @override
@@ -66,36 +96,37 @@ class _JoinRegistrationDialogState extends State<_JoinRegistrationDialog> {
             const SizedBox(height: 4),
             Text(
               widget.event.title,
-              style: GoogleFonts.outfit(
-                  fontSize: 13, color: AppTheme.textSubtle),
+              style: GoogleFonts.outfit(fontSize: 13, color: AppTheme.textSubtle),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 20),
             TextField(
               controller: _nameCtrl,
-              style: GoogleFonts.outfit(
-                  fontSize: 14, color: AppTheme.textPrimary),
+              style: GoogleFonts.outfit(fontSize: 14, color: AppTheme.textPrimary),
               decoration: InputDecoration(
                 labelText: 'Full Name',
                 hintText: 'Your name',
                 prefixIcon: Icon(Icons.person_outline_rounded,
                     size: 18, color: AppTheme.textSubtle),
+                errorText: _nameError,
               ),
               textCapitalization: TextCapitalization.words,
+              onChanged: (_) => setState(() => _nameError = null),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _emailCtrl,
-              style: GoogleFonts.outfit(
-                  fontSize: 14, color: AppTheme.textPrimary),
+              style: GoogleFonts.outfit(fontSize: 14, color: AppTheme.textPrimary),
               decoration: InputDecoration(
                 labelText: 'Email',
                 hintText: 'your@email.com',
                 prefixIcon: Icon(Icons.email_outlined,
                     size: 18, color: AppTheme.textSubtle),
+                errorText: _emailError,
               ),
               keyboardType: TextInputType.emailAddress,
+              onChanged: (_) => setState(() => _emailError = null),
             ),
             const SizedBox(height: 24),
             Row(
@@ -125,14 +156,13 @@ class _JoinRegistrationDialogState extends State<_JoinRegistrationDialog> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: GestureDetector(
-                    onTap: () => Navigator.pop(context, {
-                      'name': _nameCtrl.text.trim(),
-                      'email': _emailCtrl.text.trim(),
-                    }),
+                    onTap: _onConfirm,
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       decoration: BoxDecoration(
-                        color: AppTheme.primary,
+                        color: _canConfirm
+                            ? AppTheme.primary
+                            : AppTheme.primary.withValues(alpha: 0.35),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       alignment: Alignment.center,

@@ -62,11 +62,6 @@ class _EventCard extends StatelessWidget {
                   Row(
                     children: [
                       _CategoryTag(category: event.category),
-                      const SizedBox(width: 7),
-                      if (event.isFree)
-                        const _FreeBadge()
-                      else if (event.price != null)
-                        _PriceBadge(price: event.price!),
                       if (event.isFeatured) ...[
                         const SizedBox(width: 7),
                         _SpotlightBadge(),
@@ -152,7 +147,33 @@ class _EventCard extends StatelessWidget {
                         ),
                       ),
                       const Spacer(),
-                      _JoinButton(joined: joined, onTap: onJoin),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (event.isFree) ...[
+                            Text(
+                              'FREE',
+                              style: GoogleFonts.outfit(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF22C55E),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                          ] else if (event.price != null) ...[
+                            Text(
+                              '£${event.price!.toStringAsFixed(2)}',
+                              style: GoogleFonts.outfit(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                          ],
+                          _JoinButton(joined: joined, onTap: onJoin),
+                        ],
+                      ),
                     ],
                   ),
                 ],
@@ -326,52 +347,60 @@ class _JoinButton extends StatelessWidget {
 
   const _JoinButton({required this.joined, required this.onTap});
 
+  static const _kWidth      = 98.0;
+  static const _kIconLeft   = 12.0;
+  static const _kIconSize   = 14.0;
+  static const _kFontSize   = 13.0;
+  static const _kTextOffset = 16.0; // left padding so 'J' in Joined aligns with 'J' in Join
+  static const _kGreen      = Color(0xFF22C55E);
+
   @override
   Widget build(BuildContext context) {
-    const green = Color(0xFF22C55E);
+    final color = joined ? _kGreen : AppTheme.onPrimary;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        width: _kWidth,
+        padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: joined
-              ? green.withValues(alpha: 0.13)
-              : AppTheme.primary,
+          color: joined ? _kGreen.withValues(alpha: 0.13) : AppTheme.primary,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: joined
-                ? green.withValues(alpha: 0.45)
-                : AppTheme.primary,
+            color: joined ? _kGreen.withValues(alpha: 0.45) : AppTheme.primary,
             width: 1.5,
           ),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: joined
-              ? [
-                  const Icon(Icons.check_circle_rounded,
-                      size: 14, color: green),
-                  const SizedBox(width: 5),
-                  Text(
-                    'Joined',
-                    style: GoogleFonts.outfit(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: green,
-                    ),
-                  ),
-                ]
-              : [
-                  Text(
-                    'Join',
-                    style: GoogleFonts.outfit(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.onPrimary,
-                    ),
-                  ),
-                ],
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Padding(
+              padding: EdgeInsets.only(left: joined ? _kTextOffset : 0),
+              child: Text(
+                joined ? 'Joined' : 'Join',
+                style: GoogleFonts.outfit(
+                  fontSize: _kFontSize,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ),
+            Positioned(
+              left: _kIconLeft,
+              top: 0,
+              bottom: 0,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Icon(
+                  joined
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: _kIconSize,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
